@@ -9,7 +9,7 @@ fn test_data_dir_path() {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "macos")] {
             assert_eq!(data_dir(), home_dir.join(".openwarp"));
-        } else if #[cfg(target_os = "linux")] {
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
             assert_eq!(data_dir(), home_dir.join(".local/share/openwarp"));
         } else if #[cfg(windows)] {
             assert_eq!(data_dir(), home_dir.join("AppData\\Roaming\\openwarp\\OpenWarp\\data"));
@@ -26,7 +26,7 @@ fn test_config_local_dir_path() {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "macos")] {
             assert_eq!(config_local_dir(), home_dir.join(".openwarp"));
-        } else if #[cfg(target_os = "linux")] {
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
             assert_eq!(config_local_dir(), home_dir.join(".config/openwarp"));
         } else if #[cfg(windows)] {
             assert_eq!(config_local_dir(), home_dir.join("AppData\\Local\\openwarp\\OpenWarp\\config"));
@@ -69,7 +69,7 @@ fn test_cache_dir_path() {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "macos")] {
             assert_eq!(cache_dir(), home_dir.join("Library/Application Support/dev.openwarp.OpenWarp"));
-        } else if #[cfg(target_os = "linux")] {
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
             assert_eq!(cache_dir(), home_dir.join(".cache/openwarp"));
         } else if #[cfg(windows)] {
             assert_eq!(cache_dir(), home_dir.join("AppData\\Local\\openwarp\\OpenWarp\\cache"));
@@ -85,9 +85,15 @@ fn test_state_dir_path() {
     cfg_if::cfg_if! {
         // ChannelState, by default, is configured for Channel::Oss.
         if #[cfg(target_os = "macos")] {
+<<<<<<< HEAD
             assert_eq!(state_dir(), home_dir.join("Library/Application Support/dev.openwarp.OpenWarp"));
         } else if #[cfg(target_os = "linux")] {
             assert_eq!(state_dir(), home_dir.join(".local/state/openwarp"));
+=======
+            assert_eq!(state_dir(), home_dir.join("Library/Application Support/dev.warp.WarpOss"));
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
+            assert_eq!(state_dir(), home_dir.join(".local/state/warp-oss"));
+>>>>>>> e6098a8 (Get warp compiling on FreeBSD (#9362))
         } else if #[cfg(windows)] {
             assert_eq!(state_dir(), home_dir.join("AppData\\Local\\openwarp\\OpenWarp\\data"));
         } else {
@@ -103,7 +109,7 @@ fn test_project_path_for_warp_app_id() {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "macos")] {
             assert_eq!(project_dirs.project_path(), "dev.warp.Warp");
-        } else if #[cfg(target_os = "linux")] {
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
             assert_eq!(project_dirs.project_path(), "warp-terminal");
         } else if #[cfg(windows)] {
             assert_eq!(project_dirs.project_path(), "warp\\Warp");
@@ -120,7 +126,7 @@ fn test_project_path_for_warp_dev_app_id() {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "macos")] {
             assert_eq!(project_dirs.project_path(), "dev.warp.WarpDev");
-        } else if #[cfg(target_os = "linux")] {
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
             assert_eq!(project_dirs.project_path(), "warp-terminal-dev");
         } else if #[cfg(windows)] {
             assert_eq!(project_dirs.project_path(), "warp\\WarpDev");
@@ -136,9 +142,15 @@ fn test_project_path_for_oss_app_id() {
         .expect("should be able to compute project dirs");
     cfg_if::cfg_if! {
         if #[cfg(target_os = "macos")] {
+<<<<<<< HEAD
             assert_eq!(project_dirs.project_path(), "dev.openwarp.OpenWarp");
         } else if #[cfg(target_os = "linux")] {
             assert_eq!(project_dirs.project_path(), "openwarp");
+=======
+            assert_eq!(project_dirs.project_path(), "dev.warp.WarpOss");
+        } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
+            assert_eq!(project_dirs.project_path(), "warp-oss");
+>>>>>>> e6098a8 (Get warp compiling on FreeBSD (#9362))
         } else if #[cfg(windows)] {
             assert_eq!(project_dirs.project_path(), "openwarp\\OpenWarp");
         } else {
