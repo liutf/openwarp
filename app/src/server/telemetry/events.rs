@@ -503,6 +503,7 @@ pub enum CLIAgentType {
     Pi,
     Auggie,
     Cursor,
+    Goose,
     Unknown,
 }
 
