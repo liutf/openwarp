@@ -28,6 +28,14 @@ bash script/setup-merge-drivers.sh
 | `71054d6` | Remove `NotAmbientAgent` state | 大型 ambient_agent 重构,32 处冲突,openWarp 已分叉 |
 | `99f80df` | Fix bad merge for remote server(替代 SSH 对齐分支) | 已通过整族对齐(f0c8b7f→b19866a→99f80df→e75b315)合入,单独路径过时 |
 | `6eefa4b` | OSS .desktop align Exec | openWarp 用 `warp-oss` + `OpenWarp`,与上游 `warp-terminal-oss` 命名分叉 |
+| `4dddda6` | Preseed auth and trust settings for codex CLI | codex CLI harness 是 cloud-tied,openWarp BYOP 不需要 |
+| `5762baa` | feature flag + API binding scaffolding for cloud→cloud handoff | cloud→cloud 编排,openWarp 已删 cloud_conversations |
+| `0ab9e71` | Orchestration pills bar in Agent View (1/N) | orchestration UI,依赖已删 orchestration_event_streamer |
+| `88930cf` | Cache settings schema between Linux builds | openWarp 用自己的 openwarp_release.yml |
+| `99b287f` | ci: simplify external contributor check | openWarp 自有 workflow |
+| `0fca61d` | ci: label external-contributor PRs | openWarp 自有 workflow |
+| `805b3e2` | Increase timeout for linux builds | openWarp 自有 workflow |
+| `404bfbe` | ci: remove workflows now served by Vercel webhook | openWarp 不接 Vercel webhook |
 
 ## openWarp 已删除/特化的模块(合并时若被恢复,需手工删除)
 
