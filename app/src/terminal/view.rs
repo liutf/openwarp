@@ -4452,7 +4452,7 @@ impl TerminalView {
         &self,
         ctx: &AppContext,
     ) -> Result<(), ExitAgentViewError> {
-        match self.agent_view_controller.as_ref(ctx).can_exit_agent_view() {
+        match self.agent_view_controller.as_ref(ctx).can_exit_agent_view(ctx) {
             Err(ExitAgentViewError::LongRunningCommand)
                 if self.can_pop_nested_cloud_agent_view(ctx) =>
             {
@@ -4462,8 +4462,9 @@ impl TerminalView {
         }
     }
 
-    fn can_pop_nested_cloud_agent_view(&self, ctx: &AppContext) -> bool {
-        self.is_ambient_agent_session(ctx) && self.is_nested_cloud_mode(ctx)
+    fn can_pop_nested_cloud_agent_view(&self, _ctx: &AppContext) -> bool {
+        // openWarp:cloud_mode 已删除,nested cloud agent view 永远不存在。
+        false
     }
 
     /// Exits the active agent, either:
