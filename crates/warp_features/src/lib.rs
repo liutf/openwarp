@@ -910,6 +910,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::VerticalTabsSummaryMode,
     FeatureFlag::CloudModeSetupV2,
     FeatureFlag::ConfigurableContextWindow,
+    FeatureFlag::DragTabsToWindows,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).
