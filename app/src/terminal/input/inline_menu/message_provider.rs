@@ -58,7 +58,7 @@ pub fn default_navigation_message_items<A: InlineMenuAction, T>(
                 key: "escape".to_owned(),
                 ..Default::default()
             }),
-            MessageItem::text(" to dismiss"),
+            MessageItem::text(crate::t!("terminal-message-to-dismiss")),
         ],
         |ctx| {
             ctx.dispatch_typed_action(InlineMenuRowAction::<A>::Dismiss);

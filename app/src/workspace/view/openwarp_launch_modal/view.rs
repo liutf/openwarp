@@ -41,32 +41,34 @@ struct FeatureItem {
     inline_link: Option<InlineLink>,
 }
 
-const FEATURE_ITEMS: &[FeatureItem] = &[
-    FeatureItem {
-        icon: Icon::HeartHand,
-        title: "Contribute",
-        description: "Warp's client code is now open source. Get started by using the /feedback skill to open an issue, and follow the contribution guidelines here.",
-        inline_link: Some(InlineLink {
-            text: "here",
-            url: CONTRIBUTING_URL,
-        }),
-    },
-    FeatureItem {
-        icon: Icon::Oz,
-        title: "Open Automated Development",
-        description: "The Warp repo is managed by an agent-first workflow powered by Oz, our cloud agent orchestration platform.",
-        inline_link: Some(InlineLink {
-            text: "Oz",
-            url: OZ_URL,
-        }),
-    },
-    FeatureItem {
-        icon: Icon::MessageChatSquare,
-        title: "Introducing 'auto (open-weights)'",
-        description: "We've added a new auto model that picks the best open weight model for a task, like Kimi or MiniMax.",
-        inline_link: None,
-    },
-];
+fn feature_items() -> [FeatureItem; 3] {
+    [
+        FeatureItem {
+            icon: Icon::HeartHand,
+            title: crate::t_static!("openwarp-launch-contribute-title"),
+            description: crate::t_static!("openwarp-launch-contribute-description"),
+            inline_link: Some(InlineLink {
+                text: crate::t_static!("openwarp-launch-contribute-link-text"),
+                url: CONTRIBUTING_URL,
+            }),
+        },
+        FeatureItem {
+            icon: Icon::Oz,
+            title: crate::t_static!("openwarp-launch-oad-title"),
+            description: crate::t_static!("openwarp-launch-oad-description"),
+            inline_link: Some(InlineLink {
+                text: "Oz",
+                url: OZ_URL,
+            }),
+        },
+        FeatureItem {
+            icon: Icon::MessageChatSquare,
+            title: crate::t_static!("openwarp-launch-auto-model-title"),
+            description: crate::t_static!("openwarp-launch-auto-model-description"),
+            inline_link: None,
+        },
+    ]
+}
 
 pub fn init(app: &mut AppContext) {
     use warpui::keymap::macros::*;
@@ -142,7 +144,7 @@ impl OpenWarpLaunchModal {
         });
 
         let cta_button = ctx.add_view(|_ctx| {
-            ActionButton::new("Visit the repo", CtaButtonTheme)
+            ActionButton::new(crate::t!("openwarp-launch-visit-repo"), CtaButtonTheme)
                 .with_full_width(true)
                 .on_click(|ctx| ctx.dispatch_typed_action(OpenWarpLaunchModalAction::VisitRepo))
         });
@@ -191,7 +193,7 @@ impl OpenWarpLaunchModal {
 
     fn render_badge(appearance: &Appearance) -> Box<dyn Element> {
         Container::new(
-            Text::new_inline("New".to_string(), appearance.ui_font_family(), 14.)
+            Text::new_inline(crate::t!("common-new"), appearance.ui_font_family(), 14.)
                 .with_color(PhenomenonStyle::modal_badge_text())
                 .finish(),
         )
@@ -203,7 +205,11 @@ impl OpenWarpLaunchModal {
     }
 
     fn render_title(appearance: &Appearance) -> Box<dyn Element> {
-        Text::new("Warp is now open-source", appearance.ui_font_family(), 20.)
+        Text::new(
+            crate::t!("openwarp-launch-title"),
+            appearance.ui_font_family(),
+            20.,
+        )
             .with_color(PhenomenonStyle::modal_title_text())
             .with_style(Properties::default().weight(Weight::Semibold))
             .finish()
@@ -211,7 +217,7 @@ impl OpenWarpLaunchModal {
 
     fn render_description(appearance: &Appearance) -> Box<dyn Element> {
         Text::new(
-            "You, our community, can participate in building Warp using an agent-first workflow.",
+            crate::t!("openwarp-launch-description"),
             appearance.ui_font_family(),
             14.,
         )
@@ -327,8 +333,8 @@ impl OpenWarpLaunchModal {
         let mut features_col = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
             .with_spacing(12.);
-        for item in FEATURE_ITEMS {
-            features_col.add_child(Self::render_feature_row(item, appearance));
+        for item in feature_items() {
+            features_col.add_child(Self::render_feature_row(&item, appearance));
         }
 
         let cta = ChildView::new(&self.cta_button).finish();

@@ -212,7 +212,7 @@ impl FirstTimeCloudAgentSetupView {
 
         // Badge with blue border
         let badge = Container::new(
-            Text::new("Free credits", appearance.ui_font_family(), 12.)
+            Text::new(crate::t!("terminal-free-credits"), appearance.ui_font_family(), 12.)
                 .with_style(Properties::default().weight(Weight::Semibold))
                 .with_color(theme.accent().into())
                 .finish(),

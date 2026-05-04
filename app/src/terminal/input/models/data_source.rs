@@ -41,8 +41,7 @@ use warpui::platform::OperatingSystem;
 
 use super::model_spec_scores::{
     render_byop_spec_scores, render_model_spec_header, render_model_spec_scores, CostRow,
-    ModelSpecScoresLayout, MODEL_SPECS_DESCRIPTION, MODEL_SPECS_TITLE, REASONING_LEVEL_DESCRIPTION,
-    REASONING_LEVEL_TITLE,
+    ModelSpecScoresLayout,
 };
 
 #[derive(Clone, Debug)]
@@ -96,7 +95,7 @@ impl InlineMenuAction for AcceptModel {
                     key: "escape".to_owned(),
                     ..Default::default()
                 }),
-                MessageItem::text(" to dismiss"),
+                MessageItem::text(crate::t!("terminal-message-to-dismiss")),
             ],
             |ctx| {
                 ctx.dispatch_typed_action(
@@ -420,11 +419,17 @@ impl SearchItem for ModelSearchItem {
         let theme = appearance.theme();
 
         let (title, description) = if self.reasoning_level.is_some() {
-            (REASONING_LEVEL_TITLE, REASONING_LEVEL_DESCRIPTION)
+            (
+                crate::t!("terminal-model-specs-reasoning-level-title"),
+                crate::t!("terminal-model-specs-reasoning-level-description"),
+            )
         } else {
-            (MODEL_SPECS_TITLE, MODEL_SPECS_DESCRIPTION)
+            (
+                crate::t!("terminal-model-specs-title"),
+                crate::t!("terminal-model-specs-description"),
+            )
         };
-        let header = render_model_spec_header(title, description, app);
+        let header = render_model_spec_header(&title, &description, app);
 
         // BYOP 走专用 score 渲染:Context / Output (bar 用 log2 归一化) + Cost = BilledToApi。
         // 视觉与默认 Warp 面板完全一致,只是行的语义不同。

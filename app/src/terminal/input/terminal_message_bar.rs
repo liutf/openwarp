@@ -344,12 +344,12 @@ impl MessageProvider<TerminalMessageArgs<'_>> for DefaultMessageProducer {
         if let Some(keystroke) = keystroke {
             Some(Message::new(vec![
                 MessageItem::keystroke(keystroke),
-                MessageItem::text(" new /agent conversation"),
+                MessageItem::text(crate::t!("terminal-message-new-agent-conversation")),
             ]))
         } else {
-            Some(Message::new(vec![MessageItem::text(
-                "/agent for new conversation",
-            )]))
+            Some(Message::new(vec![MessageItem::text(crate::t!(
+                "terminal-message-agent-for-new-conversation"
+            ))]))
         }
     }
 }

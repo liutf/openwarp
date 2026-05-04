@@ -510,7 +510,7 @@ impl EnvironmentsPageView {
 
         // Create pane configuration for BackingView support
         let pane_configuration =
-            ctx.add_model(|_| crate::pane_group::pane::PaneConfiguration::new("Environments"));
+            ctx.add_model(|_| crate::pane_group::pane::PaneConfiguration::new(crate::t!("settings-environments-page-title")));
 
         let mut view = Self {
             page: PageType::new_monolith(

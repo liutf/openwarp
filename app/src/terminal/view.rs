@@ -499,7 +499,7 @@ use crate::terminal::ShellHost;
 use crate::terminal::{
     block_list_element::BlockHoverAction,
     // find::{Event as FindEvent, Find, FindDirection},
-    input::{Event as InputEvent, Input, INPUT_A11Y_HELPER, INPUT_A11Y_LABEL},
+    input::{Event as InputEvent, Input, INPUT_A11Y_HELPER_KEY, INPUT_A11Y_LABEL_KEY},
     model::block::SerializedBlock,
     shell::ShellType,
     terminal_size_element::TerminalSizeElement,
@@ -3679,14 +3679,23 @@ impl TerminalView {
 
         let control_master_error_banner = ctx.add_typed_action_view(|_| {
             Banner::new(BannerTextContent::formatted_text(vec![
-                FormattedTextFragment::plain_text("Seems like your completions are not working ("),
-                FormattedTextFragment::hyperlink("more info", CONTROLMASTER_ISSUES_URL),
-                FormattedTextFragment::plain_text("). Enabling tmux warpification in "),
+                FormattedTextFragment::plain_text(crate::t!(
+                    "terminal-banner-completions-not-working-prefix"
+                )),
+                FormattedTextFragment::hyperlink(
+                    crate::t!("terminal-banner-more-info-lower"),
+                    CONTROLMASTER_ISSUES_URL,
+                ),
+                FormattedTextFragment::plain_text(crate::t!(
+                    "terminal-banner-completions-not-working-middle"
+                )),
                 FormattedTextFragment::hyperlink_action(
-                    "settings",
+                    crate::t!("terminal-banner-settings"),
                     TerminalAction::ShowWarpifySettings,
                 ),
-                FormattedTextFragment::plain_text(" may resolve this issue."),
+                FormattedTextFragment::plain_text(crate::t!(
+                    "terminal-banner-completions-not-working-suffix"
+                )),
             ]))
         });
 
@@ -3696,10 +3705,13 @@ impl TerminalView {
 
         let incompatible_configuration_banner = ctx.add_typed_action_view(|_| {
             Banner::new(BannerTextContent::formatted_text(vec![
-                FormattedTextFragment::plain_text(
-                    "Your shell configuration is incompatible with Warp...  ",
+                FormattedTextFragment::plain_text(crate::t!(
+                    "terminal-banner-shell-config-incompatible"
+                )),
+                FormattedTextFragment::hyperlink(
+                    crate::t!("terminal-banner-more-info"),
+                    KNOWN_ISSUES_URL,
                 ),
-                FormattedTextFragment::hyperlink("More info", KNOWN_ISSUES_URL),
             ]))
         });
 
@@ -3710,11 +3722,11 @@ impl TerminalView {
         let emacs_bindings_banner = ctx.add_typed_action_view(|_| {
             Banner::new_with_buttons(
                 BannerTextContent::formatted_text(vec![
-                    FormattedTextFragment::plain_text("Did you intend "),
+                    FormattedTextFragment::plain_text(crate::t!("terminal-banner-did-you-intend")),
                     FormattedTextFragment::inline_code("ctrl-a"),
                     FormattedTextFragment::plain_text("/"),
                     FormattedTextFragment::inline_code("ctrl-e"),
-                    FormattedTextFragment::plain_text(" to move the cursor?"),
+                    FormattedTextFragment::plain_text(crate::t!("terminal-banner-move-cursor")),
                 ]),
                 // Here, we use DismissalType::Temporary and DismissalType::Permanent variants
                 // as stand-ins for changing bindings vs. leaving them as-is.
@@ -3948,7 +3960,7 @@ impl TerminalView {
             )
         });
         let agent_view_back_button = ctx.add_typed_action_view(|ctx| {
-            ActionButton::new("for terminal", AgentViewHeaderTheme)
+            ActionButton::new(crate::t!("terminal-agent-header-for-terminal"), AgentViewHeaderTheme)
                 .with_icon(icons::Icon::ArrowLeft)
                 .with_size(ButtonSize::Small)
                 .with_keybinding(
@@ -21366,7 +21378,7 @@ impl TerminalView {
             render_hoverable_block_button(
                 icon,
                 Some(ToolbeltButtonTooltip {
-                    label: "Filter block output".to_string(),
+                    label: crate::t!("terminal-filter-block-output-placeholder"),
                     tool_tip_below_button,
                 }),
                 should_disable_filter_button,
@@ -23452,7 +23464,7 @@ impl TerminalView {
                 env_var_collection
                     .title
                     .clone()
-                    .unwrap_or("Untitled".to_owned()),
+                    .unwrap_or_else(|| crate::t!("common-untitled")),
                 env_var_collection
                     .vars
                     .iter()
@@ -23495,8 +23507,9 @@ impl TerminalView {
         let (shell_path_string, shell_type) = shell_session_info;
         if shell_type == ShellType::PowerShell {
             ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                let toast =
-                    DismissibleToast::error("PowerShell subshells not supported".to_owned());
+                let toast = DismissibleToast::error(crate::t!(
+                    "terminal-toast-powershell-subshells-not-supported"
+                ));
                 toast_stack.add_ephemeral_toast(toast, window_id, ctx);
             });
             return;
@@ -23506,7 +23519,9 @@ impl TerminalView {
         // subshell start
         self.env_vars = env_var_collection.vars;
         self.model.lock().set_env_var_collection_name(Some(
-            env_var_collection.title.unwrap_or("Untitled".to_owned()),
+            env_var_collection
+                .title
+                .unwrap_or_else(|| crate::t!("common-untitled")),
         ));
         self.set_and_execute_subshell_command(&shell_path_string, shell_type, ctx);
 
@@ -24074,17 +24089,17 @@ impl TypedActionView for TerminalView {
             }
             FocusInputAndClearSelection => {
                 Custom(AccessibilityContent::new(
-                    INPUT_A11Y_LABEL,
+                    crate::i18n::t_or(INPUT_A11Y_LABEL_KEY, INPUT_A11Y_LABEL_KEY),
                     // TODO (a11y) use bindings from user settings
-                    INPUT_A11Y_HELPER,
+                    crate::i18n::t_or(INPUT_A11Y_HELPER_KEY, INPUT_A11Y_HELPER_KEY),
                     WarpA11yRole::TextareaRole,
                 ))
             }
             KeyDown(key) => {
                 let label = if key.eq("\x1b") {
-                    INPUT_A11Y_LABEL
+                    crate::i18n::t_or(INPUT_A11Y_LABEL_KEY, INPUT_A11Y_LABEL_KEY)
                 } else {
-                    key
+                    key.to_string()
                 };
                 Custom(AccessibilityContent::new_without_help(
                     label,
