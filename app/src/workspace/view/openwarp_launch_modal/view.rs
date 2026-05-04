@@ -3,7 +3,7 @@ use markdown_parser::{
 };
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
-use warp_core::ui::theme::{phenomenon::PhenomenonStyle, Fill};
+use warp_core::ui::theme::{Fill, phenomenon::PhenomenonStyle};
 use warpui::assets::asset_cache::AssetSource;
 use warpui::elements::{
     Align, CacheOption, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius,
@@ -29,14 +29,14 @@ const CONTRIBUTING_URL: &str = "https://github.com/warpdotdev/warp/blob/master/C
 const OZ_URL: &str = "https://oz.warp.dev";
 
 struct InlineLink {
-    text: &'static str,
+    text: String,
     url: &'static str,
 }
 
 struct FeatureItem {
     icon: Icon,
-    title: &'static str,
-    description: &'static str,
+    title: String,
+    description: String,
     /// If set, the first occurrence of `text` in the description is rendered as a hyperlink.
     inline_link: Option<InlineLink>,
 }
@@ -45,26 +45,26 @@ fn feature_items() -> [FeatureItem; 3] {
     [
         FeatureItem {
             icon: Icon::HeartHand,
-            title: crate::t_static!("openwarp-launch-contribute-title"),
-            description: crate::t_static!("openwarp-launch-contribute-description"),
+            title: crate::t!("openwarp-launch-contribute-title"),
+            description: crate::t!("openwarp-launch-contribute-description"),
             inline_link: Some(InlineLink {
-                text: crate::t_static!("openwarp-launch-contribute-link-text"),
+                text: crate::t!("openwarp-launch-contribute-link-text"),
                 url: CONTRIBUTING_URL,
             }),
         },
         FeatureItem {
             icon: Icon::Oz,
-            title: crate::t_static!("openwarp-launch-oad-title"),
-            description: crate::t_static!("openwarp-launch-oad-description"),
+            title: crate::t!("openwarp-launch-oad-title"),
+            description: crate::t!("openwarp-launch-oad-description"),
             inline_link: Some(InlineLink {
-                text: "Oz",
+                text: "Oz".to_string(),
                 url: OZ_URL,
             }),
         },
         FeatureItem {
             icon: Icon::MessageChatSquare,
-            title: crate::t_static!("openwarp-launch-auto-model-title"),
-            description: crate::t_static!("openwarp-launch-auto-model-description"),
+            title: crate::t!("openwarp-launch-auto-model-title"),
+            description: crate::t!("openwarp-launch-auto-model-description"),
             inline_link: None,
         },
     ]
@@ -252,7 +252,7 @@ impl OpenWarpLaunchModal {
 
     fn render_feature_description(item: &FeatureItem, appearance: &Appearance) -> Box<dyn Element> {
         let Some(link) = &item.inline_link else {
-            return Text::new(item.description, appearance.ui_font_family(), 14.)
+            return Text::new(item.description.clone(), appearance.ui_font_family(), 14.)
                 .with_color(PhenomenonStyle::modal_feature_description_text())
                 .finish();
         };
@@ -260,11 +260,11 @@ impl OpenWarpLaunchModal {
         // Build a formatted description with an inline hyperlink and inline code.
         let (before, after) = item
             .description
-            .split_once(link.text)
-            .unwrap_or((item.description, ""));
+            .split_once(link.text.as_str())
+            .unwrap_or((item.description.as_str(), ""));
 
         let link_fragment = FormattedTextFragment {
-            text: link.text.into(),
+            text: link.text.clone().into(),
             styles: FormattedTextStyles {
                 underline: true,
                 hyperlink: Some(Hyperlink::Url(link.url.into())),
