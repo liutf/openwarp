@@ -560,8 +560,7 @@ fn build_chat_request(
                                     } else {
                                         b.mime_type.clone()
                                     },
-                                    data: base64::engine::general_purpose::STANDARD
-                                        .encode(&b.data),
+                                    data: base64::engine::general_purpose::STANDARD.encode(&b.data),
                                 }
                             })
                             .collect()
