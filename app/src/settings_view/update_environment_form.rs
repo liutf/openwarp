@@ -2122,13 +2122,13 @@ impl UpdateEnvironmentForm {
                                 .with_width(icon_size)
                                 .with_height(icon_size)
                                 .finish(),
+                            )
+                            .with_child(
+                                Text::new(
+                                    crate::t!("common-retry"),
+                                    appearance.ui_font_family(),
+                                    appearance.ui_font_size(),
                                 )
-                                .with_child(
-                                    Text::new(
-                                        crate::t!("common-retry"),
-                                        appearance.ui_font_family(),
-                                        appearance.ui_font_size(),
-                                    )
                                 .with_color(theme.active_ui_text_color().into())
                                 .finish(),
                             )

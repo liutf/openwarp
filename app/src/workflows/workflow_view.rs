@@ -500,7 +500,8 @@ impl WorkflowView {
         self.is_for_agent_mode = is_for_agent_mode;
         if is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
                 editor.set_font_family(Appearance::as_ref(ctx).ui_font_family(), ctx);
             });
         }
@@ -523,7 +524,8 @@ impl WorkflowView {
 
         if is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
             });
         }
 
@@ -724,7 +726,8 @@ impl WorkflowView {
         self.is_for_agent_mode = workflow.model().data.is_agent_mode_workflow();
         if self.is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
                 editor.set_font_family(Appearance::as_ref(ctx).ui_font_family(), ctx);
             });
         }
@@ -816,7 +819,8 @@ impl WorkflowView {
 
         if self.is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
             });
         } else {
             self.content_editor_highlight_model

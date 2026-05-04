@@ -400,16 +400,14 @@ impl AgentInputFooter {
                 crate::t!("ai-footer-enable-notifications"),
                 InstallPluginButtonTheme,
             )
-                .with_icon(Icon::Download)
-                .with_tooltip(
-                    crate::t!("ai-footer-enable-notifications-tooltip"),
-                )
-                .with_size(cli_button_size)
-                .with_tooltip_alignment(TooltipAlignment::Left)
-                .with_adjoined_side(AdjoinedSide::Right)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(AgentInputFooterAction::InstallPlugin);
-                })
+            .with_icon(Icon::Download)
+            .with_tooltip(crate::t!("ai-footer-enable-notifications-tooltip"))
+            .with_size(cli_button_size)
+            .with_tooltip_alignment(TooltipAlignment::Left)
+            .with_adjoined_side(AdjoinedSide::Right)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(AgentInputFooterAction::InstallPlugin);
+            })
         });
 
         let plugin_instructions_button = ctx.add_typed_action_view(|_ctx| {
@@ -417,28 +415,31 @@ impl AgentInputFooter {
                 crate::t!("ai-footer-notifications-setup-instructions"),
                 InstallPluginButtonTheme,
             )
-                .with_icon(Icon::Info)
-                .with_tooltip(crate::t!("ai-footer-install-plugin-instructions-tooltip"))
-                .with_size(cli_button_size)
-                .with_tooltip_alignment(TooltipAlignment::Left)
-                .with_adjoined_side(AdjoinedSide::Right)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(
-                        AgentInputFooterAction::OpenPluginInstallInstructionsPane,
-                    );
-                })
+            .with_icon(Icon::Info)
+            .with_tooltip(crate::t!("ai-footer-install-plugin-instructions-tooltip"))
+            .with_size(cli_button_size)
+            .with_tooltip_alignment(TooltipAlignment::Left)
+            .with_adjoined_side(AdjoinedSide::Right)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(
+                    AgentInputFooterAction::OpenPluginInstallInstructionsPane,
+                );
+            })
         });
 
         let update_plugin_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new(crate::t!("ai-footer-update-warp-plugin"), InstallPluginButtonTheme)
-                .with_icon(Icon::Download)
-                .with_tooltip(crate::t!("ai-footer-plugin-update-available-tooltip"))
-                .with_size(cli_button_size)
-                .with_tooltip_alignment(TooltipAlignment::Left)
-                .with_adjoined_side(AdjoinedSide::Right)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(AgentInputFooterAction::UpdatePlugin);
-                })
+            ActionButton::new(
+                crate::t!("ai-footer-update-warp-plugin"),
+                InstallPluginButtonTheme,
+            )
+            .with_icon(Icon::Download)
+            .with_tooltip(crate::t!("ai-footer-plugin-update-available-tooltip"))
+            .with_size(cli_button_size)
+            .with_tooltip_alignment(TooltipAlignment::Left)
+            .with_adjoined_side(AdjoinedSide::Right)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(AgentInputFooterAction::UpdatePlugin);
+            })
         });
 
         let update_instructions_button = ctx.add_typed_action_view(|_ctx| {
@@ -446,16 +447,14 @@ impl AgentInputFooter {
                 crate::t!("ai-footer-plugin-update-instructions"),
                 InstallPluginButtonTheme,
             )
-                .with_icon(Icon::Info)
-                .with_tooltip(crate::t!("ai-footer-plugin-update-instructions-tooltip"))
-                .with_size(cli_button_size)
-                .with_tooltip_alignment(TooltipAlignment::Left)
-                .with_adjoined_side(AdjoinedSide::Right)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(
-                        AgentInputFooterAction::OpenPluginUpdateInstructionsPane,
-                    );
-                })
+            .with_icon(Icon::Info)
+            .with_tooltip(crate::t!("ai-footer-plugin-update-instructions-tooltip"))
+            .with_size(cli_button_size)
+            .with_tooltip_alignment(TooltipAlignment::Left)
+            .with_adjoined_side(AdjoinedSide::Right)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(AgentInputFooterAction::OpenPluginUpdateInstructionsPane);
+            })
         });
 
         let dismiss_plugin_chip_button = ctx.add_typed_action_view(|_ctx| {

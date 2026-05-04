@@ -103,7 +103,7 @@ impl PluginInstructionsBlock {
         let desc_element: Box<dyn Element> = if let Some(url) = link {
             let fragments = vec![
                 FormattedTextFragment::plain_text(format!("{description} ")),
-                FormattedTextFragment::hyperlink("Learn more", url),
+                FormattedTextFragment::hyperlink(crate::t!("common-learn-more"), url),
             ];
             let formatted = FormattedText::new(vec![FormattedTextLine::Line(fragments)]);
             FormattedTextElement::new(
@@ -199,8 +199,9 @@ impl View for PluginInstructionsBlock {
 
         let subtitle_text = if self.is_remote_session {
             format!(
-                "{} Be sure to run these commands on your remote machine.",
-                self.instructions.subtitle
+                "{} {}",
+                self.instructions.subtitle,
+                crate::t!("cli-agent-plugin-run-on-remote")
             )
         } else {
             self.instructions.subtitle.to_owned()
@@ -239,7 +240,7 @@ impl View for PluginInstructionsBlock {
             ));
         }
 
-        for note in self.instructions.post_install_notes {
+        for note in &self.instructions.post_install_notes {
             let post_note = Text::new((*note).to_owned(), appearance.ui_font_family(), 14.)
                 .with_color(theme.nonactive_ui_text_color().into_solid())
                 .finish();

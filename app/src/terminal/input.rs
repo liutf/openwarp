@@ -117,9 +117,9 @@ use crate::{
         },
         llms::{LLMPreferences, LLMPreferencesEvent},
         predict::next_command_model::{
-                is_command_valid, is_next_command_enabled, NextCommandModel, NextCommandModelEvent,
-                NextCommandSuggestionState, ZeroStateSuggestionInfo,
-            },
+            is_command_valid, is_next_command_enabled, NextCommandModel, NextCommandModelEvent,
+            NextCommandSuggestionState, ZeroStateSuggestionInfo,
+        },
         AIRequestUsageModel,
     },
     ai_assistant::execution_context::WarpAiExecutionContext,
@@ -5634,10 +5634,8 @@ impl Input {
                 });
             } else {
                 self.editor.update(ctx, |editor, ctx| {
-                    editor.set_placeholder_text(
-                        translate_input_key(AI_COMMAND_SEARCH_HINT_KEY),
-                        ctx,
-                    );
+                    editor
+                        .set_placeholder_text(translate_input_key(AI_COMMAND_SEARCH_HINT_KEY), ctx);
                 });
             }
         } else {

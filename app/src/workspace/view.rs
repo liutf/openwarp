@@ -609,8 +609,7 @@ pub(crate) const LEFT_PANEL_GLOBAL_SEARCH_BINDING_NAME: &str = "workspace:left_p
 pub(crate) const LEFT_PANEL_WARP_DRIVE_BINDING_NAME: &str = "workspace:left_panel_warp_drive";
 pub(crate) const LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME: &str =
     "workspace:left_panel_agent_conversations";
-pub(crate) const LEFT_PANEL_SSH_MANAGER_BINDING_NAME: &str =
-    "workspace:left_panel_ssh_manager";
+pub(crate) const LEFT_PANEL_SSH_MANAGER_BINDING_NAME: &str = "workspace:left_panel_ssh_manager";
 
 const KEYBINDINGS_TO_CACHE: [&str; 4] = [
     ASK_AI_ASSISTANT_KEYBINDING_NAME,
@@ -5529,11 +5528,11 @@ impl Workspace {
         if !FeatureFlag::ConfigurableToolbar.is_enabled() {
             return;
         }
-        let items = vec![MenuItemFields::new(crate::t!(
-            "workspace-rearrange-toolbar-items"
-        ))
-            .with_on_select_action(WorkspaceAction::OpenHeaderToolbarEditor)
-            .into_item()];
+        let items = vec![
+            MenuItemFields::new(crate::t!("workspace-rearrange-toolbar-items"))
+                .with_on_select_action(WorkspaceAction::OpenHeaderToolbarEditor)
+                .into_item(),
+        ];
         self.header_toolbar_context_menu
             .update(ctx, |menu, ctx| menu.set_items(items, ctx));
         self.show_header_toolbar_context_menu = Some(position);
@@ -6103,10 +6102,10 @@ impl Workspace {
                 let is_terminal_default = effective_default == DefaultSessionMode::Terminal;
                 let mut terminal_item =
                     MenuItemFields::new(crate::t!("workspace-new-session-terminal"))
-                    .with_on_select_action(WorkspaceAction::AddTerminalTab {
-                        hide_homepage: false,
-                    })
-                    .with_icon(icons::Icon::LayoutAlt01);
+                        .with_on_select_action(WorkspaceAction::AddTerminalTab {
+                            hide_homepage: false,
+                        })
+                        .with_icon(icons::Icon::LayoutAlt01);
                 if is_terminal_default {
                     terminal_item = terminal_item.with_key_shortcut_label(shortcut_label.clone());
                 }
@@ -6141,10 +6140,10 @@ impl Workspace {
             {
                 let mut terminal_item =
                     MenuItemFields::new(crate::t!("workspace-new-session-terminal"))
-                    .with_on_select_action(WorkspaceAction::AddTerminalTab {
-                        hide_homepage: false,
-                    })
-                    .with_icon(icons::Icon::LayoutAlt01);
+                        .with_on_select_action(WorkspaceAction::AddTerminalTab {
+                            hide_homepage: false,
+                        })
+                        .with_icon(icons::Icon::LayoutAlt01);
                 if effective_default == DefaultSessionMode::Terminal {
                     terminal_item = terminal_item.with_key_shortcut_label(shortcut_label.clone());
                 }
@@ -6170,8 +6169,8 @@ impl Workspace {
         if FeatureFlag::LocalDockerSandbox.is_enabled() {
             let mut docker_item =
                 MenuItemFields::new(crate::t!("workspace-new-session-local-docker-sandbox"))
-                .with_on_select_action(WorkspaceAction::AddDockerSandboxTab)
-                .with_icon(icons::Icon::Docker);
+                    .with_on_select_action(WorkspaceAction::AddDockerSandboxTab)
+                    .with_icon(icons::Icon::Docker);
             if effective_default == DefaultSessionMode::DockerSandbox {
                 docker_item = docker_item.with_key_shortcut_label(shortcut_label.clone());
             }
@@ -8296,8 +8295,8 @@ impl Workspace {
                             "workspace-updating-to-version",
                             version = new_version.version
                         ))
-                            .with_disabled(true)
-                            .into_item(),
+                        .with_disabled(true)
+                        .into_item(),
                     )
                 }
                 AutoupdateStage::UnableToUpdateToNewVersion { new_version }
@@ -16870,8 +16869,7 @@ impl Workspace {
 
             let left_padding = self.compute_tab_bar_left_padding(ctx);
 
-            let show_title_bar_search_bar =
-                *TabSettings::as_ref(ctx).show_title_bar_search_bar;
+            let show_title_bar_search_bar = *TabSettings::as_ref(ctx).show_title_bar_search_bar;
             let mut tab_bar_row = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -20431,10 +20429,9 @@ impl TypedActionView for Workspace {
                 self.process_updated_sync_state(ctx);
 
                 self.toast_stack.update(ctx, |view, ctx| {
-                    let new_toast =
-                        DismissibleToast::success(crate::t!(
-                            "workspace-toast-disabled-synchronized-inputs"
-                        ));
+                    let new_toast = DismissibleToast::success(crate::t!(
+                        "workspace-toast-disabled-synchronized-inputs"
+                    ));
                     view.add_ephemeral_toast(new_toast, ctx);
                 });
                 send_telemetry_from_ctx!(TelemetryEvent::DisableInputSync, ctx);
@@ -21321,7 +21318,9 @@ impl TypedActionView for Workspace {
                 send_telemetry_from_ctx!(TelemetryEvent::ConversationListItemDeleted, ctx);
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     toast_stack.add_ephemeral_toast(
-                        DismissibleToast::success(crate::t!("workspace-toast-conversation-deleted")),
+                        DismissibleToast::success(crate::t!(
+                            "workspace-toast-conversation-deleted"
+                        )),
                         window_id,
                         ctx,
                     );

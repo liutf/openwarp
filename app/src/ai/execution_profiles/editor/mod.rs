@@ -30,8 +30,8 @@ use warpui::ui_components::switch::SwitchStateHandle;
 use std::path::{Path, PathBuf};
 use warpui::{
     elements::{
-        Align, ChildView, ClippedScrollStateHandle, ClippedScrollable,
-        Container, Flex, MouseStateHandle, ParentElement, ScrollbarWidth,
+        Align, ChildView, ClippedScrollStateHandle, ClippedScrollable, Container, Flex,
+        MouseStateHandle, ParentElement, ScrollbarWidth,
     },
     AppContext, Element, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -518,11 +518,14 @@ impl ExecutionProfileEditorView {
         Self::update_profile_name_editor(&profile_name_editor, &profile_data, ctx);
 
         let delete_button = ctx.add_typed_action_view(|_| {
-            ActionButton::new(crate::t!("ai-execution-profile-delete-profile"), DangerSecondaryTheme)
-                .with_icon(Icon::Trash)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(ExecutionProfileEditorViewAction::DeleteProfile);
-                })
+            ActionButton::new(
+                crate::t!("ai-execution-profile-delete-profile"),
+                DangerSecondaryTheme,
+            )
+            .with_icon(Icon::Trash)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(ExecutionProfileEditorViewAction::DeleteProfile);
+            })
         });
 
         let mut view = Self {

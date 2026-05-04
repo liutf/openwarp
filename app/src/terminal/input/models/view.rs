@@ -186,10 +186,14 @@ impl InlineModelSelectorView {
                     let is_cli_agent_in_control_or_tagged_in =
                         cli_ctrl.as_ref(app).is_agent_in_control_or_tagged_in();
                     let message = match active_tab {
-                        InlineModelSelectorTab::FullTerminalUse if main_agent_in_progress && !is_cli_agent_in_control_or_tagged_in => {
+                        InlineModelSelectorTab::FullTerminalUse
+                            if main_agent_in_progress && !is_cli_agent_in_control_or_tagged_in =>
+                        {
                             Some(crate::t!("terminal-model-banner-base-agent"))
                         }
-                        InlineModelSelectorTab::BaseAgent if is_cli_agent_in_control_or_tagged_in => {
+                        InlineModelSelectorTab::BaseAgent
+                            if is_cli_agent_in_control_or_tagged_in =>
+                        {
                             Some(crate::t!("terminal-model-banner-full-terminal-agent"))
                         }
                         _ => None,
@@ -198,8 +202,7 @@ impl InlineModelSelectorView {
                     message.map(|msg| {
                         let appearance = Appearance::as_ref(app);
                         Alert::new().render(
-                            AlertConfig::warning(msg)
-                                .with_main_axis_size(MainAxisSize::Max),
+                            AlertConfig::warning(msg).with_main_axis_size(MainAxisSize::Max),
                             appearance,
                         )
                     })

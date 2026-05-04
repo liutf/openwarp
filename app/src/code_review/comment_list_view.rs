@@ -203,11 +203,14 @@ impl CommentListView {
         let menu = ctx.add_view(|_| Menu::new());
 
         let comments_button = ctx.add_view(|_| {
-            ActionButton::new(crate::t!("code-review-one-comment"), CustomSecondaryActionTheme)
-                .with_size(ButtonSize::Small)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(CommentListAction::ToggleCollapsed);
-                })
+            ActionButton::new(
+                crate::t!("code-review-one-comment"),
+                CustomSecondaryActionTheme,
+            )
+            .with_size(ButtonSize::Small)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(CommentListAction::ToggleCollapsed);
+            })
         });
 
         ctx.subscribe_to_view(&menu, |me, _, event, ctx| match event {

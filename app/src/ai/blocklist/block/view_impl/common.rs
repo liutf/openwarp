@@ -2977,10 +2977,16 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
             if *will_attempt_resume {
                 if *waiting_for_network {
                     format!(
-                        "{error_message}\n\nWill resume conversation when network connectivity is restored..."
+                        "{}\n\n{}",
+                        error_message,
+                        crate::t!("agent-error-will-resume-when-network-restored")
                     )
                 } else {
-                    format!("{error_message}\n\nAttempting to resume conversation...")
+                    format!(
+                        "{}\n\n{}",
+                        error_message,
+                        crate::t!("agent-error-attempting-resume-conversation")
+                    )
                 }
             } else {
                 format!("{ERROR_APOLOGY_TEXT}\n\n{error_message}")

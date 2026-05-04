@@ -106,9 +106,7 @@ impl SearchItem for ProfileSearchItem {
                 is_selected,
                 ..
             } => (profile_name.clone(), *is_selected),
-            ProfileSearchItemKind::ManageProfiles => {
-                (crate::t!("terminal-manage-profiles"), false)
-            }
+            ProfileSearchItemKind::ManageProfiles => (crate::t!("terminal-manage-profiles"), false),
         };
 
         let mut label = Text::new_inline(label_text, appearance.ui_font_family(), font_size)
