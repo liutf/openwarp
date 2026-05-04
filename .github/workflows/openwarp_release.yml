@@ -188,6 +188,12 @@ jobs:
           is_self_hosted: false
           install_release_deps: true
 
+      - name: Install extra dependencies for deb and build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev fakeroot
+        shell: bash
+
       - name: Ensure rust target is installed
         run: rustup target add x86_64-unknown-linux-gnu
         shell: bash
