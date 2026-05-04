@@ -1626,36 +1626,43 @@ pub async fn generate_byop_output(
     log::info!("[byop] diag_body_approx_len={}", diag_body_json.len());
     log::info!("[byop-diag] full_request_json={diag_body_json}");
 
-    // 主动扫描原始文本里的"可疑反斜杠序列":虽然 serde_json 序列化时会把
-    // `\` escape 成 `\\`(合法 JSON),但若出现在 base64 / 已 escape 字符串等场景,
-    // 上游 proxy 若做"把 `\\u` 误解析回 `\u`"的转换,就会触发 invalid escape。
-    // 这里只扫描 raw 字符串里的 `\n` / `\u` / `\x` / `\0`-`\9` 等模式,辅助定位嫌疑文本。
+    // 主动扫描原始文本里的"可疑反斜杠序列":serde_json 把源字符串里的字面
+    // `\` 序列化为 `\\`,所以 wire body 里出现"两个连续反斜杠 + u/x" 才意味着
+    // 原文有字面 `\u` / `\x`,这是 proxy 误"还原 `\\u` → `\u`"触发 invalid escape
+    // 的真实风险点。源字符串里的 `\n` / `\r` / `\t` 经 serde_json 输出为单个反斜杠 +
+    // 字母,本身就是合法 JSON escape,proxy 不会再二次还原,不算可疑。
     fn scan_suspicious_backslash(label: &str, s: &str) {
         let bytes = s.as_bytes();
         let mut bs_hits: Vec<(usize, String)> = Vec::new();
         let mut ctrl_hits: Vec<(usize, u8)> = Vec::new();
-        for (i, &b) in bytes.iter().enumerate() {
-            // 1) 字面 `\u` `\x` `\a` `\v` 序列(serde_json 会输出 `\\X`,合法,
-            //    但 proxy 若做"`\\u` 还原 `\u`"误处理会触发 invalid escape)
-            if b == b'\\' && i + 1 < bytes.len() {
-                let next = bytes[i + 1];
-                if matches!(next, b'n' | b'r' | b't' | b'u' | b'x' | b'a' | b'v') {
-                    let end = (i + 8).min(bytes.len());
-                    let snippet = String::from_utf8_lossy(&bytes[i..end]).to_string();
-                    if bs_hits.len() < 5 {
-                        bs_hits.push((i, snippet));
-                    }
+        let mut i = 0;
+        while i < bytes.len() {
+            let b = bytes[i];
+            // 字面 `\\u` / `\\x` 序列(源字符串中含 `\u` / `\x`)。
+            if b == b'\\'
+                && i + 2 < bytes.len()
+                && bytes[i + 1] == b'\\'
+                && matches!(bytes[i + 2], b'u' | b'x')
+            {
+                let end = (i + 10).min(bytes.len());
+                let snippet = String::from_utf8_lossy(&bytes[i..end]).to_string();
+                if bs_hits.len() < 5 {
+                    bs_hits.push((i, snippet));
                 }
+                // 跳过这一对,避免对同一位置触发多次。
+                i += 3;
+                continue;
             }
-            // 2) raw 控制字符(byte 0x00-0x08, 0x0B-0x0C, 0x0E-0x1F)
-            //    serde_json 会 escape 为 `\u00XX`,合法 JSON;但部分 strict proxy
-            //    或经过 base64 / 中间编码层时这些字节最容易出错。
+            // raw 控制字符(byte 0x00-0x08, 0x0B-0x0C, 0x0E-0x1F)。
+            // serde_json 会 escape 为 `\u00XX`,合法 JSON;但部分 strict proxy
+            // 或经过 base64 / 中间编码层时这些字节最容易出错。
             if (b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r')) && ctrl_hits.len() < 10 {
                 ctrl_hits.push((i, b));
             }
+            i += 1;
         }
         if !bs_hits.is_empty() {
-            log::warn!("[byop] {label} suspicious literal '\\X' patterns: {bs_hits:?}");
+            log::warn!("[byop] {label} suspicious literal '\\\\u'/'\\\\x' patterns: {bs_hits:?}");
         }
         if !ctrl_hits.is_empty() {
             log::warn!("[byop] {label} contains raw control chars (offset, byte): {ctrl_hits:?}");
