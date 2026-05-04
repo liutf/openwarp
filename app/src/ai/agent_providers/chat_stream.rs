@@ -57,7 +57,7 @@ use genai::{Client, ModelIden, ServiceTarget};
 
 use crate::ai::agent::api::{RequestParams, ResponseStream};
 use crate::ai::agent::{AIAgentInput, RunningCommand};
-use crate::ai::byop_compaction::{self, state::CompactionState};
+use crate::ai::byop_compaction;
 use crate::server::server_api::AIApiError;
 use crate::settings::AgentProviderApiType;
 use ai::agent::convert::ConvertToAPITypeError;
@@ -2414,6 +2414,27 @@ fn parse_incoming_tool_call(
     match (tool.from_args)(&args_str) {
         Ok(t) => Ok(t),
         Err(e) => {
+            // 第一次失败:大概率是模型把 bool/数字/数组 序列化成了字符串。
+            // 拿工具自身的 schema 跑一次类型 coerce,再 retry。
+            let schema = (tool.parameters)();
+            if let Some(coerced) = tools::coerce::coerce_args_against_schema(&args_str, &schema) {
+                match (tool.from_args)(&coerced) {
+                    Ok(t) => {
+                        log::info!(
+                            "[byop] from_args coerced ok: tool={} original_err={e:#}",
+                            call.fn_name
+                        );
+                        return Ok(t);
+                    }
+                    Err(e2) => {
+                        log::warn!(
+                            "[byop] from_args failed (after coerce): tool={} err={e2:#} original_err={e:#} coerced_args={coerced} args_str={args_str}",
+                            call.fn_name
+                        );
+                        return Err(e2);
+                    }
+                }
+            }
             // 诊断:解析失败时把 from_args 实际拿到的字符串原样打出来,
             // 配合上层 [byop] tool_call_in 的 args= 行可以判断:
             //   1. 是否模型出参类型错(bool→"true" / 数字→"1" 等)
