@@ -41,7 +41,7 @@ function traceToSvg(input: string): Promise<string> {
         turdSize: 4,
         optTolerance: 0.4,
         color: "#1a1a1a",
-        background: "transparent",
+        background: "white",
       },
       (err, svg) => (err ? reject(err) : resolve(svg)),
     );
@@ -52,7 +52,7 @@ function traceToSvg(input: string): Promise<string> {
 async function renderPng(svg: Buffer, size: number, padding: number): Promise<Buffer> {
   const inner = Math.max(1, size - padding * 2);
   const innerPng = await sharp(svg, { density: 384 })
-    .resize(inner, inner, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(inner, inner, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 255 } })
     .png()
     .toBuffer();
   return sharp({
@@ -60,7 +60,7 @@ async function renderPng(svg: Buffer, size: number, padding: number): Promise<Bu
       width: size,
       height: size,
       channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      background: { r: 255, g: 255, b: 255, alpha: 255 },
     },
   })
     .composite([{ input: innerPng, gravity: "center" }])
