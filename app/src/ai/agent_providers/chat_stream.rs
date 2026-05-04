@@ -504,10 +504,45 @@ fn build_chat_request(
                     continue;
                 }
                 buf.flush_into(&mut messages);
-                // 历史轮的 user query 没有 AIAgentContext 数据(InputContext 在 warp 协议
-                // 是单 Request 级 payload,不持久化到 message),只送 query 文本。
-                // 这跟 warp 自家路径行为一致 — 历史轮不重发附件 context。
-                messages.push(ChatMessage::user(u.query.clone()));
+                // OpenWarp:历史轮多模态保活。warp 自家路径靠云端 server 重注入 InputContext,
+                // BYOP 直连没有那层,所以我们在 `make_user_query_message` 持久化时把 image
+                // 字节塞进了 `UserQuery.context.images`,这里反向把它们重建成 UserBinary 并
+                // 走 `build_user_message_with_binaries`,使后续轮模型仍能看到先前粘贴的截图。
+                // 没有图片 → 退回老路 `ChatMessage::user(text)`,与修复前等价。
+                let history_binaries: Vec<user_context::UserBinary> = u
+                    .context
+                    .as_ref()
+                    .map(|ctx| {
+                        ctx.images
+                            .iter()
+                            .filter(|img| !img.data.is_empty())
+                            .enumerate()
+                            .map(|(idx, img)| {
+                                use base64::Engine;
+                                user_context::UserBinary {
+                                    name: format!("history-image-{}-{idx}", &msg.id),
+                                    content_type: if img.mime_type.is_empty() {
+                                        "image/png".to_string()
+                                    } else {
+                                        img.mime_type.clone()
+                                    },
+                                    data: base64::engine::general_purpose::STANDARD
+                                        .encode(&img.data),
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if history_binaries.is_empty() {
+                    messages.push(ChatMessage::user(u.query.clone()));
+                } else {
+                    messages.push(build_user_message_with_binaries(
+                        u.query.clone(),
+                        history_binaries,
+                        api_type,
+                        model_id,
+                    ));
+                }
             }
             // hidden assistant message 直接 skip(它是某次压缩对的 assistant_msg_id,
             // 摘要文本已经在对应 user 分支注入)
@@ -1563,11 +1598,23 @@ pub async fn generate_byop_output(
     //
     // emit 时机必须在 CreateTask 之后(任务已升级为 Server 状态),
     // 在模型响应开始之前(UI 顺序:user 显示 → thinking/answer)。
-    let pending_user_queries: Vec<String> = params
+    // OpenWarp:历史轮多模态保活。除 query 文本外,把当前轮 UserQuery.context 里的 image
+    // binary 一并打包进 `UserQuery.context.images` 持久化,使 build_chat_request 下一轮
+    // 重建 messages 时能从历史 message 上恢复 image,继续以 ContentPart::Binary 注入上游。
+    // 上游 warp 自家路径不需要这步因为云端 server 持有 InputContext;BYOP 直连必须客户端自管。
+    let pending_user_queries: Vec<(String, Vec<user_context::UserBinary>)> = params
         .input
         .iter()
         .filter_map(|i| match i {
-            AIAgentInput::UserQuery { query, .. } => Some(query.clone()),
+            AIAgentInput::UserQuery { query, context, .. } => {
+                let attachments = user_context::collect_user_attachments(context);
+                let images: Vec<user_context::UserBinary> = attachments
+                    .binaries
+                    .into_iter()
+                    .filter(|b| b.content_type.to_ascii_lowercase().starts_with("image/"))
+                    .collect();
+                Some((query.clone(), images))
+            }
             _ => None,
         })
         .collect();
@@ -1705,11 +1752,12 @@ pub async fn generate_byop_output(
             target_task_id.as_str()
         };
         let mut persistence_messages: Vec<api::Message> = Vec::new();
-        for q in &pending_user_queries {
+        for (q, imgs) in &pending_user_queries {
             persistence_messages.push(make_user_query_message(
                 persistence_task_id,
                 &request_id,
                 q.clone(),
+                imgs,
             ));
         }
         for (call_id, content) in &pending_tool_results {
@@ -1801,11 +1849,12 @@ pub async fn generate_byop_output(
             //    后续模型 chunks 走 `current_task_id = subtask_id`,append 到这个起点之后。
             if !pending_user_queries.is_empty() {
                 let mut subtask_messages: Vec<api::Message> = Vec::new();
-                for q in &pending_user_queries {
+                for (q, imgs) in &pending_user_queries {
                     subtask_messages.push(make_user_query_message(
                         &subtask_id,
                         &request_id,
                         q.clone(),
+                        imgs,
                     ));
                 }
                 yield Ok(make_add_messages_event(&subtask_id, subtask_messages));
@@ -2487,7 +2536,37 @@ fn make_agent_output_message(task_id: &str, request_id: &str, text: String) -> a
     }
 }
 
-fn make_user_query_message(task_id: &str, request_id: &str, query: String) -> api::Message {
+fn make_user_query_message(
+    task_id: &str,
+    request_id: &str,
+    query: String,
+    images: &[user_context::UserBinary],
+) -> api::Message {
+    // OpenWarp:把 image binary 写进 `UserQuery.context.images`(InputContext 字段)。
+    // proto Image.data 是 raw bytes,UserBinary.data 是 base64 字符串,这里 decode 一次。
+    // decode 失败的条目跳过,不让历史持久化阻塞模型流(decode 失败本来就意味着这条 image
+    // 当轮也没真送上游,丢就丢了,不影响 history 一致性)。
+    let proto_images: Vec<api::input_context::Image> = images
+        .iter()
+        .filter_map(|b| {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(&b.data)
+                .ok()
+                .map(|bytes| api::input_context::Image {
+                    data: bytes,
+                    mime_type: b.content_type.clone(),
+                })
+        })
+        .collect();
+    let context = if proto_images.is_empty() {
+        None
+    } else {
+        Some(api::InputContext {
+            images: proto_images,
+            ..Default::default()
+        })
+    };
     api::Message {
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
@@ -2495,6 +2574,7 @@ fn make_user_query_message(task_id: &str, request_id: &str, query: String) -> ap
         citations: vec![],
         message: Some(api::message::Message::UserQuery(api::message::UserQuery {
             query,
+            context,
             ..Default::default()
         })),
         request_id: request_id.to_owned(),
