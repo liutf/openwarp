@@ -611,7 +611,6 @@ pub(crate) const LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME: &str =
     "workspace:left_panel_agent_conversations";
 pub(crate) const LEFT_PANEL_SSH_MANAGER_BINDING_NAME: &str =
     "workspace:left_panel_ssh_manager";
-pub(crate) const TOGGLE_SSH_MANAGER_BINDING_NAME: &str = "workspace:toggle_ssh_manager";
 
 const KEYBINDINGS_TO_CACHE: [&str; 4] = [
     ASK_AI_ASSISTANT_KEYBINDING_NAME,

@@ -91,7 +91,7 @@ use crate::workspace::view::{
     NEW_AMBIENT_AGENT_TAB_BINDING_NAME, NEW_TAB_BINDING_NAME, NEW_TERMINAL_TAB_BINDING_NAME,
     OPEN_GLOBAL_SEARCH_BINDING_NAME, TOGGLE_CONVERSATION_LIST_VIEW_BINDING_NAME,
     TOGGLE_NOTIFICATION_MAILBOX_BINDING_NAME, TOGGLE_PROJECT_EXPLORER_BINDING_NAME,
-    TOGGLE_RIGHT_PANEL_BINDING_NAME, TOGGLE_SSH_MANAGER_BINDING_NAME,
+    TOGGLE_RIGHT_PANEL_BINDING_NAME,
     TOGGLE_TAB_CONFIGS_MENU_BINDING_NAME, TOGGLE_VERTICAL_TABS_PANEL_BINDING_NAME,
     TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
@@ -822,12 +822,6 @@ pub fn init(app: &mut AppContext) {
         .with_context_predicate(id!("Workspace"))
         .with_mac_key_binding("ctrl-5")
         .with_linux_or_windows_key_binding("alt-5"),
-        EditableBinding::new(
-            TOGGLE_SSH_MANAGER_BINDING_NAME,
-            BindingDescription::new(crate::t!("keybinding-desc-workspace-toggle-ssh-manager")),
-            WorkspaceAction::ToggleSshManager,
-        )
-        .with_context_predicate(id!("Workspace")),
         EditableBinding::new(
             TOGGLE_PROJECT_EXPLORER_BINDING_NAME,
             BindingDescription::new(crate::t!(

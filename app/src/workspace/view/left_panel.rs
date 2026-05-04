@@ -45,7 +45,7 @@ use crate::workspace::view::{
     LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME, LEFT_PANEL_SSH_MANAGER_BINDING_NAME,
     LEFT_PANEL_WARP_DRIVE_BINDING_NAME, OPEN_GLOBAL_SEARCH_BINDING_NAME,
     TOGGLE_CONVERSATION_LIST_VIEW_BINDING_NAME, TOGGLE_PROJECT_EXPLORER_BINDING_NAME,
-    TOGGLE_SSH_MANAGER_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
+    TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 use crate::{
     appearance::Appearance,
@@ -478,10 +478,7 @@ impl LeftPanelView {
                 }
             }
             ToolPanelView::SshManager => {
-                let tooltip_keybinding_names = vec![
-                    LEFT_PANEL_SSH_MANAGER_BINDING_NAME,
-                    TOGGLE_SSH_MANAGER_BINDING_NAME,
-                ];
+                let tooltip_keybinding_names = vec![LEFT_PANEL_SSH_MANAGER_BINDING_NAME];
                 ToolbeltButtonConfig {
                     icon: Icon::Server01,
                     active_icon: None,
