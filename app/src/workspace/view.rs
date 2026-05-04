@@ -3429,7 +3429,8 @@ impl Workspace {
                 ..
             }
             | TabSettingsChangedEvent::VerticalTabsShowPrLink { .. }
-            | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. } => {
+            | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. }
+            | TabSettingsChangedEvent::ShowTitleBarSearchBar { .. } => {
                 ctx.notify();
             }
             TabSettingsChangedEvent::VerticalTabsShowDetailsOnHover { .. } => {
@@ -16853,11 +16854,14 @@ impl Workspace {
 
             let left_padding = self.compute_tab_bar_left_padding(ctx);
 
-            let tab_bar = Flex::row()
+            let show_title_bar_search_bar =
+                *TabSettings::as_ref(ctx).show_title_bar_search_bar;
+            let mut tab_bar_row = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(tab_bar.finish())
-                .with_child(
+                .with_child(tab_bar.finish());
+            if show_title_bar_search_bar {
+                tab_bar_row.add_child(
                     Shrinkable::new(
                         1.,
                         Clipped::new(
@@ -16871,9 +16875,12 @@ impl Workspace {
                         .finish(),
                     )
                     .finish(),
-                )
-                .with_child(right_controls.finish())
-                .finish();
+                );
+            } else {
+                tab_bar_row.add_child(Shrinkable::new(1., Empty::new().finish()).finish());
+            }
+            tab_bar_row.add_child(right_controls.finish());
+            let tab_bar = tab_bar_row.finish();
 
             return EventHandler::new(
                 Container::new(tab_bar)
