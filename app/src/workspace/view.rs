@@ -127,7 +127,7 @@ use crate::workspace::view::openwarp_launch_modal::{
 };
 use crate::workspace::{ForkFromExchange, ForkedConversationDestination};
 use crate::BlocklistAIHistoryModel;
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManager;
+
 #[cfg(all(target_os = "macos", feature = "crash_reporting"))]
 use sentry::protocol::{Attachment, AttachmentType};
 use serde_json;
@@ -14091,7 +14091,6 @@ impl Workspace {
             });
 
             let window_id = ctx.window_id();
-            let working_directory_clone = path_if_local.clone();
             let path_if_local_clone = path_if_local.clone();
             ActiveSession::handle(ctx).update(ctx, |active_session, ctx| {
                 active_session.set_session_state(
@@ -14101,12 +14100,6 @@ impl Workspace {
                     Some(terminal_handle.id()),
                     ctx,
                 );
-            });
-
-            CodebaseIndexManager::handle(ctx).update(ctx, |manager, _ctx| {
-                if let Some(working_directory) = working_directory_clone {
-                    manager.handle_active_session_changed(working_directory.as_path());
-                }
             });
 
             let is_remote = matches!(is_local, Some(false));
@@ -18985,14 +18978,6 @@ impl Workspace {
 
         if *code_settings.code_as_default_editor.value() {
             context.set.insert(flags::CODE_AS_DEFAULT_EDITOR);
-        }
-
-        if *code_settings.codebase_context_enabled.value() {
-            context.set.insert(flags::IS_CODEBASE_INDEXING_ENABLED);
-        }
-
-        if *code_settings.auto_indexing_enabled.value() {
-            context.set.insert(flags::IS_AUTOINDEXING_ENABLED);
         }
 
         if *input_settings.show_hint_text.value() {

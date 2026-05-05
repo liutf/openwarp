@@ -2490,8 +2490,7 @@ impl AIConversation {
                 // 高频 chunk 流(每 ~5-50ms 一帧)下,跳过 `self.todo_lists.last().cloned()`
                 // (整个 todo list 浅 clone)+ `self.code_review.as_ref().cloned()`
                 // 可显著降低单 chunk CPU 开销,缓解 view::render 帧时间被拖长。
-                let is_text_or_reasoning_append =
-                    is_pure_text_or_reasoning_mask(&mask);
+                let is_text_or_reasoning_append = is_pure_text_or_reasoning_mask(&mask);
                 let current_todo_list = if is_text_or_reasoning_append {
                     None
                 } else {

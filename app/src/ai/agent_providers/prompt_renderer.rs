@@ -488,7 +488,10 @@ mod tests {
         ];
         let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools, false);
         for name in &tools {
-            assert!(out.contains(name), "expected `{name}` in prompt, got: {out}");
+            assert!(
+                out.contains(name),
+                "expected `{name}` in prompt, got: {out}"
+            );
         }
         // 不应再出现旧黑名单措辞
         assert!(

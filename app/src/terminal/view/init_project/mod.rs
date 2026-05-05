@@ -21,7 +21,7 @@ use crate::ui_components::icons::Icon;
 use crate::view_components::DismissibleToast;
 use crate::workspace::ToastStack;
 use crate::TelemetryEvent;
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManager;
+
 use lsp::supported_servers::LSPServerType;
 use lsp_server_selector::{create_lsp_server_selector, LSPServerInfo};
 pub use model::{InitProjectModel, InitProjectModelEvent, InitStepKind};
@@ -1051,16 +1051,14 @@ impl TypedActionView for InitStepBlock {
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
-            InitProjectBlockAction::IndexCodebase(directory) => {
+            InitProjectBlockAction::IndexCodebase(_directory) => {
                 send_telemetry_from_ctx!(
                     TelemetryEvent::AgentModeSetupCodebaseContextAction {
                         action: AgentModeSetupCodebaseContextActionType::IndexCodebase,
                     },
                     ctx
                 );
-                CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
-                    manager.index_directory(directory.clone(), ctx);
-                });
+
                 self.model.update(ctx, |model, ctx| {
                     model.mark_step_completed(
                         InitStepKind::CodebaseContext,

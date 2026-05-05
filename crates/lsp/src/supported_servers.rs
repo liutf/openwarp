@@ -36,16 +36,7 @@ pub struct CustomBinaryConfig {
 /// This is also used in underlying sqlite type persistence. We should be careful
 /// not to rename an existing variant, as it will break persistence.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    EnumIter,
-    schemars::JsonSchema,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, schemars::JsonSchema,
 )]
 pub enum LSPServerType {
     RustAnalyzer,
