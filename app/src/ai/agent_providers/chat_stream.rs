@@ -53,7 +53,7 @@ use genai::chat::{
     MessageContent, Tool as GenaiTool, ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client, ModelIden, ServiceTarget};
+use genai::{Client, ModelIden, ServiceTarget, WebConfig};
 
 use crate::ai::agent::api::{RequestParams, ResponseStream};
 use crate::ai::agent::{AIAgentInput, RunningCommand};
@@ -1512,7 +1512,19 @@ pub(super) fn build_client(
             })
         },
     );
+
+    // OpenWarp BYOP:SSE 流必须不带 gzip。`Accept-Encoding: gzip` 会让 nginx
+    // 类代理把响应压缩,server 必须 flush 完整 deflate frame 客户端才能解出
+    // 明文,流式语义被破坏成 ~K 字节 burst,体感"几百毫秒一卡"。zed/opencode
+    // 用 native fetch / std HTTP 不主动协商 gzip on SSE,所以同代理无问题。
+    //
+    // 这里显式构造 `WebConfig` 即使 genai default 已经 `gzip=false`(fork 修改)。
+    let web_config = WebConfig {
+        gzip: false,
+        ..WebConfig::default()
+    };
     Client::builder()
+        .with_web_config(web_config)
         .with_service_target_resolver(resolver)
         .build()
 }
@@ -2020,11 +2032,6 @@ pub async fn generate_byop_output(
         // 长 args 工具(create_or_edit_document、长 grep query)args 跨多 chunk 累积时,
         // 节流 ≥ 200ms reparse + update,体感跟文本流一样连续而不是首帧定格到 End。
         let mut tool_last_update: HashMap<String, std::time::Instant> = HashMap::new();
-        // call_id → 该 call_id 累积收到的 chunk 数(不区分是否 parse 成功)。
-        // P1-4 诊断:用于排查"BYOP 占位卡迟到"问题——
-        // 若值 >= 3 且最终在 End 时才 emit,说明 stream 期间 args 一直不完整,
-        // 用户感知为"长时间无反馈"。debug log 记录每次首次成功 parse 的 chunk 序号。
-        let mut tool_chunk_seen: HashMap<String, u32> = HashMap::new();
         // 增量刷新节流阈值:小于此值的连续 chunk 不再 update_message,避免频繁 UI 重排。
         // 注:SDK stream 每个 ChatStreamEvent 独立 await,多 tool 并发时本就是顺序到达,
         // 同 tick batch emit 在此层意义不大;真正降抖在节流上,这条注释提醒后续不要瞎引入 batch。
@@ -2045,19 +2052,6 @@ pub async fn generate_byop_output(
         // 二者相加除以 context_window 即为"context 占用率",和 warp 自家 server 路径语义一致。
         let mut captured_prompt_tokens: i32 = 0;
         let mut captured_completion_tokens: i32 = 0;
-
-        // OpenWarp 优化 2:chunk 频率诊断 log。`RUST_LOG=warp=debug` 时打印每个
-        // text/reasoning chunk 的字节数 + 距上一帧 ms。用于排查"一卡一卡"投诉:
-        // - 间隔 < 50ms 字节小 → 链路健康,卡顿来自下游 render;
-        // - 间隔 200~1000ms 字节起伏大 → 上游/代理 buffering;
-        // - 间隔短但字节巨大(>500B)→ provider 一次 flush 大块。
-        // info 级会污染日志,所以走 debug。stream 末一次性出聚合 INFO(p50/p95/max)。
-        let stream_start_time = std::time::Instant::now();
-        let mut last_text_chunk_at: Option<std::time::Instant> = None;
-        let mut last_reasoning_chunk_at: Option<std::time::Instant> = None;
-        // 帧间隔分布(ms)用于 stream 末聚合统计。
-        let mut text_intervals_ms: Vec<u64> = Vec::new();
-        let mut reasoning_intervals_ms: Vec<u64> = Vec::new();
 
         while let Some(item) = sdk_stream.next().await {
             let event = match item {
@@ -2102,20 +2096,6 @@ pub async fn generate_byop_output(
                 ChatStreamEvent::Chunk(c) if !c.content.is_empty() => {
                     chunk_count += 1;
                     chunk_bytes += c.content.len();
-                    // 优化 2 诊断:间隔 + 字节
-                    let now = std::time::Instant::now();
-                    let interval_ms = last_text_chunk_at
-                        .map(|t| now.duration_since(t).as_millis() as u64)
-                        .unwrap_or(0);
-                    last_text_chunk_at = Some(now);
-                    text_intervals_ms.push(interval_ms);
-                    log::debug!(
-                        "[byop][stream] text_chunk #{n} bytes={b} interval_ms={i} since_start_ms={s}",
-                        n = chunk_count,
-                        b = c.content.len(),
-                        i = interval_ms,
-                        s = now.duration_since(stream_start_time).as_millis(),
-                    );
                     if let Some(id) = text_msg_id.clone() {
                         yield Ok(make_append_event(&current_task_id, &id, AppendKind::Text(c.content)));
                     } else {
@@ -2130,20 +2110,6 @@ pub async fn generate_byop_output(
                 ChatStreamEvent::ReasoningChunk(c) if !c.content.is_empty() => {
                     reasoning_count += 1;
                     reasoning_bytes += c.content.len();
-                    // 优化 2 诊断:间隔 + 字节
-                    let now = std::time::Instant::now();
-                    let interval_ms = last_reasoning_chunk_at
-                        .map(|t| now.duration_since(t).as_millis() as u64)
-                        .unwrap_or(0);
-                    last_reasoning_chunk_at = Some(now);
-                    reasoning_intervals_ms.push(interval_ms);
-                    log::debug!(
-                        "[byop][stream] reasoning_chunk #{n} bytes={b} interval_ms={i} since_start_ms={s}",
-                        n = reasoning_count,
-                        b = c.content.len(),
-                        i = interval_ms,
-                        s = now.duration_since(stream_start_time).as_millis(),
-                    );
                     if let Some(id) = reasoning_msg_id.clone() {
                         yield Ok(make_append_event(&current_task_id, &id, AppendKind::Reasoning(c.content)));
                     } else {
@@ -2170,12 +2136,6 @@ pub async fn generate_byop_output(
                     // 增量刷新 args,长 args 工具(create_or_edit_document、长 grep 等)体感连续。
                     // web 工具(webfetch/websearch)走自己的 loading 帧链路(L2102 区域),
                     // 这里跳过避免双卡。
-                    // 累积 chunk 计数,P1-4 诊断用。
-                    let chunk_idx = {
-                        let entry = tool_chunk_seen.entry(call.call_id.clone()).or_insert(0);
-                        *entry += 1;
-                        *entry
-                    };
                     if call.fn_name != tools::webfetch::TOOL_NAME
                         && call.fn_name != tools::websearch::TOOL_NAME
                     {
@@ -2214,12 +2174,6 @@ pub async fn generate_byop_output(
                             // chunk"),所以即便首帧 args 不全,后续任意 chunk 完整时
                             // 都会立刻触发占位 emit—— 这就是 P1-4 的覆盖路径,
                             // 不再需要 generic placeholder variant。
-                            log::debug!(
-                                "[byop] tool_placeholder_emit: name={} call_id={} chunk_idx={}",
-                                call.fn_name,
-                                call.call_id,
-                                chunk_idx,
-                            );
                             let msg_id = Uuid::new_v4().to_string();
                             let mut placeholder = make_tool_call_message(
                                 &current_task_id,
@@ -2284,53 +2238,6 @@ pub async fn generate_byop_output(
             log::warn!(
                 "[byop] stream returned 0 content / 0 reasoning / 0 tool_calls — \
                  上游可能返回空响应(model_id 错? max_tokens 缺? proxy 异常?)"
-            );
-        }
-
-        // 优化 2 诊断:聚合 chunk 间隔分布(p50/p95/max + 平均字节)。
-        // 用户体感"一卡一卡"时,看这一行就能判定根因:
-        // - p50 < 50ms 字节均小:链路健康(opencode 同代理也会一样,渲染层瓶颈)
-        // - p50 200~1000ms:**上游/代理 buffering**,代码层无解,换 endpoint
-        // - p50 < 100ms 但 max 跳到 500ms+:provider 偶发 burst,可接受
-        fn percentile(sorted: &[u64], p: f64) -> u64 {
-            if sorted.is_empty() {
-                return 0;
-            }
-            let idx = ((sorted.len() as f64) * p).min(sorted.len() as f64 - 1.) as usize;
-            sorted[idx]
-        }
-        if !text_intervals_ms.is_empty() {
-            // 第 1 帧 interval = 0(无前帧),不参与分布。
-            let mut sorted: Vec<u64> = text_intervals_ms.iter().skip(1).copied().collect();
-            sorted.sort_unstable();
-            let avg_bytes =
-                if chunk_count > 0 { chunk_bytes / chunk_count as usize } else { 0 };
-            log::info!(
-                "[byop][stream] text_chunk_pacing: count={c} avg_bytes={a}B \
-                 interval_ms p50={p50} p95={p95} max={max}",
-                c = chunk_count,
-                a = avg_bytes,
-                p50 = percentile(&sorted, 0.5),
-                p95 = percentile(&sorted, 0.95),
-                max = sorted.last().copied().unwrap_or(0),
-            );
-        }
-        if !reasoning_intervals_ms.is_empty() {
-            let mut sorted: Vec<u64> = reasoning_intervals_ms.iter().skip(1).copied().collect();
-            sorted.sort_unstable();
-            let avg_bytes = if reasoning_count > 0 {
-                reasoning_bytes / reasoning_count as usize
-            } else {
-                0
-            };
-            log::info!(
-                "[byop][stream] reasoning_chunk_pacing: count={c} avg_bytes={a}B \
-                 interval_ms p50={p50} p95={p95} max={max}",
-                c = reasoning_count,
-                a = avg_bytes,
-                p50 = percentile(&sorted, 0.5),
-                p95 = percentile(&sorted, 0.95),
-                max = sorted.last().copied().unwrap_or(0),
             );
         }
 
@@ -2499,22 +2406,6 @@ pub async fn generate_byop_output(
                             vec!["tool_call".to_owned()],
                         ));
                     } else {
-                        // P1-4 诊断:stream 全程 chunk 都 parse 失败 → End 时才兜底 emit。
-                        // 用户感知为"BYOP 调用前长时间无 UI 反馈"。chunks_seen 高时尤其明显。
-                        // schema/coerce 仍能成功说明 chunk 切片单看不是合法 JSON、必须等到 End
-                        // captured_content 拿到完整 args 才能 parse —— provider 端流式行为问题,
-                        // 非本侧 bug,但这条 log 是排查"卡住没反馈"投诉的第一手依据。
-                        let chunks_seen =
-                            tool_chunk_seen.get(&call.call_id).copied().unwrap_or(0);
-                        if chunks_seen > 0 {
-                            log::warn!(
-                                "[byop] tool_placeholder_late: name={} call_id={} \
-                                 chunks_seen={} — stream 全程未能 parse,UI 反馈延迟到 End",
-                                call.fn_name,
-                                call.call_id,
-                                chunks_seen,
-                            );
-                        }
                         final_messages.push(make_tool_call_message(
                             &current_task_id,
                             &request_id,
@@ -3141,16 +3032,17 @@ fn make_web_search_status_from_result(
             .map(extract_search_pages_from_exa_results)
             .unwrap_or_default()
             .into_iter()
-            .map(|(url, title)| {
-                api::message::web_search::status::success::SearchedPage { url, title }
-            })
+            .map(
+                |(url, title)| api::message::web_search::status::success::SearchedPage {
+                    url,
+                    title,
+                },
+            )
             .collect();
-        api::message::web_search::status::Type::Success(
-            api::message::web_search::status::Success {
-                query: query.to_owned(),
-                pages,
-            },
-        )
+        api::message::web_search::status::Type::Success(api::message::web_search::status::Success {
+            query: query.to_owned(),
+            pages,
+        })
     };
     api::Message {
         id: Uuid::new_v4().to_string(),
@@ -3158,7 +3050,9 @@ fn make_web_search_status_from_result(
         server_message_data: String::new(),
         citations: vec![],
         message: Some(api::message::Message::WebSearch(api::message::WebSearch {
-            status: Some(api::message::web_search::Status { r#type: Some(r#type) }),
+            status: Some(api::message::web_search::Status {
+                r#type: Some(r#type),
+            }),
         })),
         request_id: request_id.to_owned(),
         timestamp: None,
@@ -3212,15 +3106,13 @@ fn make_web_fetch_status_from_result(
             .and_then(|v| v.as_u64())
             .map(|c| (200..300).contains(&c))
             .unwrap_or(true);
-        api::message::web_fetch::status::Type::Success(
-            api::message::web_fetch::status::Success {
-                pages: vec![api::message::web_fetch::status::success::FetchedPage {
-                    url,
-                    title: String::new(),
-                    success,
-                }],
-            },
-        )
+        api::message::web_fetch::status::Type::Success(api::message::web_fetch::status::Success {
+            pages: vec![api::message::web_fetch::status::success::FetchedPage {
+                url,
+                title: String::new(),
+                success,
+            }],
+        })
     };
     api::Message {
         id: Uuid::new_v4().to_string(),
@@ -3228,7 +3120,9 @@ fn make_web_fetch_status_from_result(
         server_message_data: String::new(),
         citations: vec![],
         message: Some(api::message::Message::WebFetch(api::message::WebFetch {
-            status: Some(api::message::web_fetch::Status { r#type: Some(r#type) }),
+            status: Some(api::message::web_fetch::Status {
+                r#type: Some(r#type),
+            }),
         })),
         request_id: request_id.to_owned(),
         timestamp: None,
@@ -3409,7 +3303,10 @@ mod assistant_buffer_tests {
         buf.flush_into(&mut msgs);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].role, ChatRole::Assistant);
-        assert!(reasoning_part(&msgs[0]).is_none(), "must not echo reasoning");
+        assert!(
+            reasoning_part(&msgs[0]).is_none(),
+            "must not echo reasoning"
+        );
     }
 
     /// gate=false + tool_calls + 真实 reasoning → tool_calls 这条也不挂 reasoning。
@@ -3428,7 +3325,10 @@ mod assistant_buffer_tests {
         buf.flush_into(&mut msgs);
         assert_eq!(msgs.len(), 2, "text + tool_calls flush 成两条");
         for m in &msgs {
-            assert!(reasoning_part(m).is_none(), "any-msg reasoning must be absent");
+            assert!(
+                reasoning_part(m).is_none(),
+                "any-msg reasoning must be absent"
+            );
         }
     }
 
