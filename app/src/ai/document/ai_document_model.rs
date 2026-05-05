@@ -240,22 +240,12 @@ impl AIDocumentModel {
             return false;
         };
 
-        let Some(plan_folder_id) = self.get_or_create_plan_folder(owner, ctx).into_server() else {
-            // Plan folder is still being created (has ClientId only).
-            // If we save using the ClientId as the parent folder, the document
-            // will end up in a broken state once the folder is saved.
-            // Queue the document for creation until the folder gets a ServerId.
-            self.pending_document_queue
-                .push(PendingDocument { id, title, content });
-
-            if let Some(document) = self.documents.get_mut(&id) {
-                let client_id = ClientId::new();
-                document.sync_id = Some(SyncId::ClientId(client_id));
-            }
-            return true;
-        };
-
-        self.create_notebook_in_plan_folder(id, &title, &content, owner, plan_folder_id, ctx);
+        // Create the notebook immediately under the Plans folder regardless of whether
+        // the folder has a ClientId or ServerId. In openWarp there is no cloud to
+        // upgrade the folder to a ServerId, so waiting in pending_document_queue would
+        // mean the document never appears in the Drive sidebar.
+        let plan_folder_sync_id = self.get_or_create_plan_folder(owner, ctx);
+        self.create_notebook_with_folder_sync_id(id, &title, &content, owner, plan_folder_sync_id, ctx);
         ctx.emit(AIDocumentModelEvent::DocumentSaveStatusUpdated(id));
         true
     }
@@ -1132,6 +1122,27 @@ impl AIDocumentModel {
         plan_folder_id: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
+        self.create_notebook_with_folder_sync_id(
+            id,
+            title,
+            content,
+            owner,
+            SyncId::ServerId(plan_folder_id),
+            ctx,
+        );
+    }
+
+    /// Create a notebook under the Plans folder using any SyncId (ClientId or ServerId).
+    /// This allows local-only Drive entries to appear in the sidebar without cloud.
+    fn create_notebook_with_folder_sync_id(
+        &mut self,
+        id: AIDocumentId,
+        title: &str,
+        content: &str,
+        owner: Owner,
+        folder_sync_id: SyncId,
+        ctx: &mut ModelContext<Self>,
+    ) {
         let client_id = ClientId::new();
         let server_conversation_id = self.get_server_conversation_id(&id, ctx);
         if let Some(document) = self.documents.get_mut(&id) {
@@ -1152,7 +1163,7 @@ impl AIDocumentModel {
             update_manager.create_notebook(
                 client_id,
                 owner,
-                Some(SyncId::ServerId(plan_folder_id)),
+                Some(folder_sync_id),
                 notebook_model,
                 CloudObjectEventEntrypoint::Unknown,
                 true,
