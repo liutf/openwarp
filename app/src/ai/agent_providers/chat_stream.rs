@@ -1667,6 +1667,7 @@ fn build_chat_options(
     base_url: &str,
     model_id: &str,
     effort_setting: crate::settings::ReasoningEffortSetting,
+    extra_headers: Vec<(String, String)>,
 ) -> ChatOptions {
     let mut opts = ChatOptions::default()
         .with_capture_content(true)
@@ -1717,6 +1718,9 @@ fn build_chat_options(
              (model={model_id} setting={effort_setting:?})"
         );
         opts = opts.with_extra_body(json!({"enable_thinking": true}));
+    }
+    if !extra_headers.is_empty() {
+        opts = opts.with_extra_headers(extra_headers);
     }
 
     opts
@@ -1780,6 +1784,7 @@ pub async fn generate_byop_output(
     model_id: String,
     api_type: AgentProviderApiType,
     reasoning_effort: crate::settings::ReasoningEffortSetting,
+    extra_headers: Vec<(String, String)>,
     task_id: String,
     target_task_id: String,
     needs_create_task: bool,
@@ -1797,7 +1802,7 @@ pub async fn generate_byop_output(
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
     let force_echo_reasoning = super::reasoning::model_requires_reasoning_echo(api_type, &model_id);
     let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, &model_id);
-    let chat_opts = build_chat_options(api_type, &base_url, &model_id, reasoning_effort);
+    let chat_opts = build_chat_options(api_type, &base_url, &model_id, reasoning_effort, extra_headers);
     let client = build_client(api_type, base_url, api_key);
     let conversation_id = params
         .conversation_token

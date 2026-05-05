@@ -9,8 +9,8 @@ use crate::ai::agent::conversation::AIConversation;
 
 use super::algorithm::{prune_decisions, select, MessageRef};
 use super::config::CompactionConfig;
-use super::overflow::ModelLimit;
 use super::message_view::{build_tool_name_lookup, project};
+use super::overflow::ModelLimit;
 use super::state::CompletedCompaction;
 
 /// 从 conversation 的 root task 倒序找最后一条 `Message::AgentOutput` —

@@ -657,9 +657,7 @@ impl AIDocumentView {
                 .finish()
             }
             // openWarp 中这两个状态不会正常出现，隐藏按钮。
-            AIDocumentSaveStatus::NotSaved | AIDocumentSaveStatus::Saving => {
-                Empty::new().finish()
-            }
+            AIDocumentSaveStatus::NotSaved | AIDocumentSaveStatus::Saving => Empty::new().finish(),
         }
     }
 

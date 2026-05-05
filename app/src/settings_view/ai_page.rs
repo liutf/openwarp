@@ -2312,6 +2312,19 @@ pub enum AISettingsPageAction {
         model_index: usize,
         max_output_tokens: u32,
     },
+    AddAgentProviderHeader {
+        provider_id: String,
+    },
+    RemoveAgentProviderHeader {
+        provider_id: String,
+        header_index: usize,
+    },
+    UpdateAgentProviderHeader {
+        provider_id: String,
+        header_index: usize,
+        key: String,
+        value: String,
+    },
     FetchAgentProviderModels {
         provider_id: String,
     },
@@ -3309,6 +3322,50 @@ impl TypedActionView for AISettingsPageView {
                         }
                     },
                 );
+            }
+            AISettingsPageAction::AddAgentProviderHeader { provider_id } => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let mut providers = settings.agent_providers.value().clone();
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
+                        p.extra_headers.push((String::new(), String::new()));
+                    }
+                    let _ = settings.agent_providers.set_value(providers, ctx);
+                });
+                // header 行数量变化后需要新建/销毁 EditorView handle,仅 notify 不会刷新 rows。
+                self.rebuild_current_page(ctx);
+            }
+            AISettingsPageAction::RemoveAgentProviderHeader {
+                provider_id,
+                header_index,
+            } => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let mut providers = settings.agent_providers.value().clone();
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
+                        if *header_index < p.extra_headers.len() {
+                            p.extra_headers.remove(*header_index);
+                        }
+                    }
+                    let _ = settings.agent_providers.set_value(providers, ctx);
+                });
+                // 删除同样会导致 index 与现有 HeaderRow handle 漂移,需要重建页面。
+                self.rebuild_current_page(ctx);
+            }
+            AISettingsPageAction::UpdateAgentProviderHeader {
+                provider_id,
+                header_index,
+                key,
+                value,
+            } => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let mut providers = settings.agent_providers.value().clone();
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
+                        if let Some(h) = p.extra_headers.get_mut(*header_index) {
+                            *h = (key.clone(), value.clone());
+                        }
+                    }
+                    let _ = settings.agent_providers.set_value(providers, ctx);
+                });
+                ctx.notify();
             }
             AISettingsPageAction::EnsureModelsDevLoaded => {
                 use crate::ai::agent_providers::models_dev;

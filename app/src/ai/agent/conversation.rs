@@ -2866,7 +2866,9 @@ impl AIConversation {
                     match serde_json::to_string(&self.compaction_state) {
                         Ok(json) => Some(json),
                         Err(e) => {
-                            log::error!("[byop-compaction] failed to serialize compaction_state: {e}");
+                            log::error!(
+                                "[byop-compaction] failed to serialize compaction_state: {e}"
+                            );
                             None
                         }
                     }

@@ -245,7 +245,14 @@ impl AIDocumentModel {
         // upgrade the folder to a ServerId, so waiting in pending_document_queue would
         // mean the document never appears in the Drive sidebar.
         let plan_folder_sync_id = self.get_or_create_plan_folder(owner, ctx);
-        self.create_notebook_with_folder_sync_id(id, &title, &content, owner, plan_folder_sync_id, ctx);
+        self.create_notebook_with_folder_sync_id(
+            id,
+            &title,
+            &content,
+            owner,
+            plan_folder_sync_id,
+            ctx,
+        );
         ctx.emit(AIDocumentModelEvent::DocumentSaveStatusUpdated(id));
         true
     }

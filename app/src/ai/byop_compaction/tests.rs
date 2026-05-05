@@ -5,12 +5,12 @@
 use super::algorithm::{prune_decisions, select, turns, MessageRef, Role, ToolOutputRef};
 use super::commit::commit_summarization;
 use super::config::CompactionConfig;
-use crate::ai::agent::conversation::{AIConversation, AIConversationId};
-use warp_multi_agent_api as api;
 use super::consts::*;
 use super::overflow::{is_overflow, usable, ModelLimit, TokenCounts};
 use super::prompt::{build_continue_message, build_prompt, SUMMARY_TEMPLATE};
 use super::token::estimate;
+use crate::ai::agent::conversation::{AIConversation, AIConversationId};
+use warp_multi_agent_api as api;
 
 // -- token ---------------------------------------------------------------
 
