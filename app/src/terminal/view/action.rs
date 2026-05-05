@@ -374,7 +374,6 @@ pub enum TerminalAction {
     ToggleCodeReviewPane {
         entrypoint: CodeReviewPaneEntrypoint,
     },
-    InitProject,
     SummarizeConversation,
     AddProjectAtCurrentDirectory,
     OpenProjectRulesPane,
@@ -659,7 +658,6 @@ impl fmt::Debug for TerminalAction {
             ToggleTodoPopup => write!(f, "ToggleTodoPopup"),
             CloseTodoPopup => write!(f, "CloseTodoPopup"),
             ToggleCodeReviewPane { .. } => write!(f, "ToggleCodeReviewPane"),
-            InitProject => write!(f, "InitProject"),
             AddProjectAtCurrentDirectory => write!(f, "AddProjectAtCurrentDirectory"),
             OpenProjectRulesPane => write!(f, "OpenProjectRulesPane"),
             OpenViewMCPPane => write!(f, "OpenViewMCPPane"),

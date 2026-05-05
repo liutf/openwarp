@@ -766,23 +766,38 @@ impl CodePageWidget {
         );
 
         let lsp_manager = LspManagerModel::as_ref(app);
+        let enabled_servers = CodeSettings::as_ref(app)
+            .enabled_lsp_servers
+            .value()
+            .clone();
 
         for (idx, server_type) in LSPServerType::all().enumerate() {
             let mouse_states = lsp_row_mouse_states.get(idx).cloned().unwrap_or_default();
-            let server_model = lsp_manager.workspace_roots().find_map(|root| {
-                lsp_manager.servers_for_workspace(root).and_then(|servers| {
-                    servers
-                        .iter()
-                        .find(|server| server.as_ref(app).server_type() == server_type)
-                })
-            });
-            content.add_child(self.render_lsp_server_row(
-                server_type,
-                server_model,
-                mouse_states,
-                appearance,
-                app,
-            ));
+
+            if enabled_servers.contains(&server_type) {
+                let server_model = lsp_manager.workspace_roots().find_map(|root| {
+                    lsp_manager.servers_for_workspace(root).and_then(|servers| {
+                        servers
+                            .iter()
+                            .find(|server| server.as_ref(app).server_type() == server_type)
+                    })
+                });
+                content.add_child(self.render_lsp_server_row(
+                    server_type,
+                    server_model,
+                    mouse_states,
+                    appearance,
+                    app,
+                ));
+            } else {
+                content.add_child(self.render_suggested_lsp_server_row(
+                    &PathBuf::new(),
+                    server_type,
+                    None,
+                    mouse_states,
+                    appearance,
+                ));
+            }
         }
 
         content.finish()

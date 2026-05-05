@@ -364,6 +364,7 @@ impl AIConversation {
             run_id,
             autoexecute_override,
             last_event_sequence,
+            compaction_state,
         ) = if let Some(data) = conversation_data {
             let server_conversation_token = data
                 .server_conversation_token
@@ -395,6 +396,14 @@ impl AIConversation {
                 AIConversationAutoexecuteMode::default()
             };
             let last_event_sequence = data.last_event_sequence;
+            let compaction_state = data
+                .compaction_state_json
+                .and_then(|json| {
+                    serde_json::from_str(&json)
+                        .map_err(|e| log::warn!("[byop-compaction] failed to deserialize compaction_state, resetting: {e}"))
+                        .ok()
+                })
+                .unwrap_or_default();
 
             (
                 server_conversation_token,
@@ -408,6 +417,7 @@ impl AIConversation {
                 run_id,
                 autoexecute_override,
                 last_event_sequence,
+                compaction_state,
             )
         } else {
             (
@@ -422,6 +432,7 @@ impl AIConversation {
                 None,
                 AIConversationAutoexecuteMode::default(),
                 None,
+                crate::ai::byop_compaction::state::CompactionState::default(),
             )
         };
 
@@ -465,7 +476,7 @@ impl AIConversation {
             parent_conversation_id,
             is_remote_child: false,
             last_event_sequence,
-            compaction_state: Default::default(),
+            compaction_state,
         })
     }
 
@@ -2849,6 +2860,17 @@ impl AIConversation {
                 run_id: self.task_id.map(|id| id.to_string()),
                 autoexecute_override: Some(self.autoexecute_override.into()),
                 last_event_sequence: self.last_event_sequence,
+                compaction_state_json: if self.compaction_state.completed().is_empty() {
+                    None
+                } else {
+                    match serde_json::to_string(&self.compaction_state) {
+                        Ok(json) => Some(json),
+                        Err(e) => {
+                            log::error!("[byop-compaction] failed to serialize compaction_state: {e}");
+                            None
+                        }
+                    }
+                },
             },
         };
         ctx.spawn(

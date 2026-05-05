@@ -552,23 +552,21 @@ fn build_chat_request(
                 continue;
             }
         }
+        if hidden_msg_ids.contains(&msg.id) {
+            if let Some(summary_text) = summary_inserts.get(&msg.id) {
+                buf.flush_into(&mut messages);
+                messages.push(ChatMessage::user(
+                    "Conversation history was compacted. Below is the structured summary of all prior turns.".to_string(),
+                ));
+                messages.push(ChatMessage::assistant(summary_text.clone()));
+            }
+            continue;
+        }
         let Some(inner) = &msg.message else {
             continue;
         };
         match inner {
             api::message::Message::UserQuery(u) => {
-                // 压缩投影:hidden 区间的 user message 替换为合成的"以下为已压缩历史的摘要"对
-                if hidden_msg_ids.contains(&msg.id) {
-                    if let Some(summary_text) = summary_inserts.get(&msg.id) {
-                        buf.flush_into(&mut messages);
-                        messages.push(ChatMessage::user(
-                            "Conversation history was compacted. Below is the structured summary of all prior turns.".to_string(),
-                        ));
-                        messages.push(ChatMessage::assistant(summary_text.clone()));
-                    }
-                    // 没有 summary_text 的 hidden user 直接 skip(不应该发生,防御性)
-                    continue;
-                }
                 buf.flush_into(&mut messages);
                 // OpenWarp:历史轮多模态保活。warp 自家路径靠云端 server 重注入 InputContext,
                 // BYOP 直连没有那层,所以 `make_user_query_message` 持久化时把所有 binary
@@ -610,13 +608,6 @@ fn build_chat_request(
                         model_id,
                     ));
                 }
-            }
-            // hidden assistant message 直接 skip(它是某次压缩对的 assistant_msg_id,
-            // 摘要文本已经在对应 user 分支注入)
-            api::message::Message::AgentReasoning(_) | api::message::Message::AgentOutput(_)
-                if hidden_msg_ids.contains(&msg.id) =>
-            {
-                continue;
             }
             api::message::Message::AgentReasoning(r) => {
                 // 把上一轮的 reasoning 挂到下一个要 flush 的 assistant message 上。
@@ -1300,7 +1291,6 @@ fn serialize_outgoing_tool_call(
             )
         }
         Some(Tool::OpenCodeReview(_)) => ("open_code_review".to_owned(), "{}".to_owned()),
-        Some(Tool::InitProject(_)) => ("init_project".to_owned(), "{}".to_owned()),
         Some(Tool::TransferShellCommandControlToUser(t)) => (
             "transfer_shell_command_control_to_user".to_owned(),
             json!({ "reason": t.reason }).to_string(),
@@ -1387,7 +1377,6 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
     "apply_file_diffs",
     "write_to_long_running_shell_command",
     "open_code_review",
-    "init_project",
     "transfer_shell_command_control_to_user",
     "suggest_prompt",
 ];

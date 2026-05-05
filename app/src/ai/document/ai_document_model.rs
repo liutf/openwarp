@@ -62,12 +62,12 @@ struct AIDocumentSaveRequest {
 
 /// The status of saving an AI Document to Warp Drive
 pub enum AIDocumentSaveStatus {
-    /// Not being synced with Warp Drive at all
-    NotSaved,
-    /// Is being saved to Warp Drive, but has not finished yet
-    Saving,
-    /// Has been saved to Warp Drive
+    /// 已保存到本地 SQLite
     Saved,
+    /// 云端同步中（保留兼容，openWarp 不使用）
+    Saving,
+    /// 未保存（仅用于无文档时的兜底）
+    NotSaved,
 }
 
 impl AIDocumentSaveStatus {
@@ -261,11 +261,10 @@ impl AIDocumentModel {
     }
 
     pub fn get_document_save_status(&self, id: &AIDocumentId) -> AIDocumentSaveStatus {
-        let sync_id = self.documents.get(id).and_then(|doc| doc.sync_id);
-        if sync_id.and_then(|id| id.into_server()).is_some() {
+        // openWarp 不使用云端同步；Plan 内容已自动写入本地 SQLite，
+        // 文档存在即视为已保存。
+        if self.documents.contains_key(id) {
             AIDocumentSaveStatus::Saved
-        } else if sync_id.and_then(|id| id.into_client()).is_some() {
-            AIDocumentSaveStatus::Saving
         } else {
             AIDocumentSaveStatus::NotSaved
         }

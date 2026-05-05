@@ -291,7 +291,7 @@ impl Default for AIExecutionProfile {
             active_ai_model: None,
             next_command_model: None,
             context_window_limit: None,
-            autosync_plans_to_warp_drive: true,
+            autosync_plans_to_warp_drive: false,
             web_search_enabled: true,
         }
     }
