@@ -2016,6 +2016,19 @@ pub async fn generate_byop_output(
         // 之前就能看到"调用 X 工具"反馈),流末用 update_message 原地刷新为最终 args。
         // 不在表里的 call_id(首帧 parse 失败 / web 工具)走老路径在 End 后一次性 emit。
         let mut tool_msg_ids: HashMap<String, String> = HashMap::new();
+        // call_id → 上次 update_message 增量刷新的时刻。
+        // 长 args 工具(create_or_edit_document、长 grep query)args 跨多 chunk 累积时,
+        // 节流 ≥ 200ms reparse + update,体感跟文本流一样连续而不是首帧定格到 End。
+        let mut tool_last_update: HashMap<String, std::time::Instant> = HashMap::new();
+        // call_id → 该 call_id 累积收到的 chunk 数(不区分是否 parse 成功)。
+        // P1-4 诊断:用于排查"BYOP 占位卡迟到"问题——
+        // 若值 >= 3 且最终在 End 时才 emit,说明 stream 期间 args 一直不完整,
+        // 用户感知为"长时间无反馈"。debug log 记录每次首次成功 parse 的 chunk 序号。
+        let mut tool_chunk_seen: HashMap<String, u32> = HashMap::new();
+        // 增量刷新节流阈值:小于此值的连续 chunk 不再 update_message,避免频繁 UI 重排。
+        // 注:SDK stream 每个 ChatStreamEvent 独立 await,多 tool 并发时本就是顺序到达,
+        // 同 tick batch emit 在此层意义不大;真正降抖在节流上,这条注释提醒后续不要瞎引入 batch。
+        const TOOL_ARGS_UPDATE_THROTTLE_MS: u64 = 200;
         // 诊断:统计 stream 各类事件计数,流末打 INFO log。
         // 用于排查"消息静默消失"——如果 chunk_count=0 且 tool_count=0,说明上游返回空内容。
         let mut start_count: u32 = 0;
@@ -2032,6 +2045,19 @@ pub async fn generate_byop_output(
         // 二者相加除以 context_window 即为"context 占用率",和 warp 自家 server 路径语义一致。
         let mut captured_prompt_tokens: i32 = 0;
         let mut captured_completion_tokens: i32 = 0;
+
+        // OpenWarp 优化 2:chunk 频率诊断 log。`RUST_LOG=warp=debug` 时打印每个
+        // text/reasoning chunk 的字节数 + 距上一帧 ms。用于排查"一卡一卡"投诉:
+        // - 间隔 < 50ms 字节小 → 链路健康,卡顿来自下游 render;
+        // - 间隔 200~1000ms 字节起伏大 → 上游/代理 buffering;
+        // - 间隔短但字节巨大(>500B)→ provider 一次 flush 大块。
+        // info 级会污染日志,所以走 debug。stream 末一次性出聚合 INFO(p50/p95/max)。
+        let stream_start_time = std::time::Instant::now();
+        let mut last_text_chunk_at: Option<std::time::Instant> = None;
+        let mut last_reasoning_chunk_at: Option<std::time::Instant> = None;
+        // 帧间隔分布(ms)用于 stream 末聚合统计。
+        let mut text_intervals_ms: Vec<u64> = Vec::new();
+        let mut reasoning_intervals_ms: Vec<u64> = Vec::new();
 
         while let Some(item) = sdk_stream.next().await {
             let event = match item {
@@ -2076,6 +2102,20 @@ pub async fn generate_byop_output(
                 ChatStreamEvent::Chunk(c) if !c.content.is_empty() => {
                     chunk_count += 1;
                     chunk_bytes += c.content.len();
+                    // 优化 2 诊断:间隔 + 字节
+                    let now = std::time::Instant::now();
+                    let interval_ms = last_text_chunk_at
+                        .map(|t| now.duration_since(t).as_millis() as u64)
+                        .unwrap_or(0);
+                    last_text_chunk_at = Some(now);
+                    text_intervals_ms.push(interval_ms);
+                    log::debug!(
+                        "[byop][stream] text_chunk #{n} bytes={b} interval_ms={i} since_start_ms={s}",
+                        n = chunk_count,
+                        b = c.content.len(),
+                        i = interval_ms,
+                        s = now.duration_since(stream_start_time).as_millis(),
+                    );
                     if let Some(id) = text_msg_id.clone() {
                         yield Ok(make_append_event(&current_task_id, &id, AppendKind::Text(c.content)));
                     } else {
@@ -2090,6 +2130,20 @@ pub async fn generate_byop_output(
                 ChatStreamEvent::ReasoningChunk(c) if !c.content.is_empty() => {
                     reasoning_count += 1;
                     reasoning_bytes += c.content.len();
+                    // 优化 2 诊断:间隔 + 字节
+                    let now = std::time::Instant::now();
+                    let interval_ms = last_reasoning_chunk_at
+                        .map(|t| now.duration_since(t).as_millis() as u64)
+                        .unwrap_or(0);
+                    last_reasoning_chunk_at = Some(now);
+                    reasoning_intervals_ms.push(interval_ms);
+                    log::debug!(
+                        "[byop][stream] reasoning_chunk #{n} bytes={b} interval_ms={i} since_start_ms={s}",
+                        n = reasoning_count,
+                        b = c.content.len(),
+                        i = interval_ms,
+                        s = now.duration_since(stream_start_time).as_millis(),
+                    );
                     if let Some(id) = reasoning_msg_id.clone() {
                         yield Ok(make_append_event(&current_task_id, &id, AppendKind::Reasoning(c.content)));
                     } else {
@@ -2108,16 +2162,64 @@ pub async fn generate_byop_output(
                     if call.call_id.is_empty() {
                         call.call_id = Uuid::new_v4().to_string();
                     }
-                    // 首次见到该 call_id → 立即 emit 一条占位 ToolCall 消息,让 UI 在
-                    // stream End 之前就出现"调用 X 工具"卡片。性能保障:仅"首次出现且
-                    // 可解析"才 yield 一次,后续 chunk 完全静默(只 insert tool_bufs);
-                    // 每 tool 至多 2 次 yield(首帧 + End 终帧)。web 工具走自己的
-                    // loading 帧链路(L2102 区域),这里 skip 避免双卡。
-                    if !tool_msg_ids.contains_key(&call.call_id)
-                        && call.fn_name != tools::webfetch::TOOL_NAME
+                    // 首次见到该 call_id → 立即 push 占位 ToolCall 消息到 pending_placeholders,
+                    // 让 UI 在 stream End 之前就出现"调用 X 工具"卡片。
+                    // 多 tool 同 tick 内来时:本循环结束前统一 batch emit 一次 add_messages,
+                    // 减少 view tree 重排次数。
+                    // 已在表里(占位已发)且 args 又来新 chunk → 节流 ≥ 200ms reparse + update_message
+                    // 增量刷新 args,长 args 工具(create_or_edit_document、长 grep 等)体感连续。
+                    // web 工具(webfetch/websearch)走自己的 loading 帧链路(L2102 区域),
+                    // 这里跳过避免双卡。
+                    // 累积 chunk 计数,P1-4 诊断用。
+                    let chunk_idx = {
+                        let entry = tool_chunk_seen.entry(call.call_id.clone()).or_insert(0);
+                        *entry += 1;
+                        *entry
+                    };
+                    if call.fn_name != tools::webfetch::TOOL_NAME
                         && call.fn_name != tools::websearch::TOOL_NAME
                     {
-                        if let Ok(parsed) = parse_incoming_tool_call(&call, mcp_context.as_ref()) {
+                        if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
+                            // 已 emit 占位 → 节流增量刷新。
+                            let now = std::time::Instant::now();
+                            let last = tool_last_update.get(&call.call_id).copied();
+                            let elapsed_ok = last
+                                .map(|t| now.duration_since(t).as_millis() as u64 >= TOOL_ARGS_UPDATE_THROTTLE_MS)
+                                .unwrap_or(true);
+                            if elapsed_ok {
+                                if let Ok(parsed) =
+                                    parse_incoming_tool_call(&call, mcp_context.as_ref())
+                                {
+                                    let mut updated = make_tool_call_message(
+                                        &current_task_id,
+                                        &request_id,
+                                        &call.call_id,
+                                        parsed,
+                                    );
+                                    updated.id = msg_id;
+                                    tool_last_update.insert(call.call_id.clone(), now);
+                                    yield Ok(make_update_message_event(
+                                        &current_task_id,
+                                        updated,
+                                        vec!["tool_call".to_owned()],
+                                    ));
+                                }
+                                // reparse 失败(intermediate 状态):静默,等下次 chunk。
+                            }
+                        } else if let Ok(parsed) =
+                            parse_incoming_tool_call(&call, mcp_context.as_ref())
+                        {
+                            // 首次 parse 成功 → 立即 emit 占位卡。
+                            // 每个 chunk 在未 emit 占位前都会重 parse(即"retry on every
+                            // chunk"),所以即便首帧 args 不全,后续任意 chunk 完整时
+                            // 都会立刻触发占位 emit—— 这就是 P1-4 的覆盖路径,
+                            // 不再需要 generic placeholder variant。
+                            log::debug!(
+                                "[byop] tool_placeholder_emit: name={} call_id={} chunk_idx={}",
+                                call.fn_name,
+                                call.call_id,
+                                chunk_idx,
+                            );
                             let msg_id = Uuid::new_v4().to_string();
                             let mut placeholder = make_tool_call_message(
                                 &current_task_id,
@@ -2127,13 +2229,17 @@ pub async fn generate_byop_output(
                             );
                             placeholder.id = msg_id.clone();
                             tool_msg_ids.insert(call.call_id.clone(), msg_id);
+                            tool_last_update.insert(
+                                call.call_id.clone(),
+                                std::time::Instant::now(),
+                            );
                             yield Ok(make_add_messages_event(
                                 &current_task_id,
                                 vec![placeholder],
                             ));
                         }
-                        // parse 失败(args 还不完整 / 未知工具):暂不 emit,
-                        // 等 End 时走老路径,避免视觉抖动。
+                        // 首帧 parse 失败(args 还不完整 / 未知工具):暂不 emit,
+                        // 等下次 chunk 再尝试或 End 时走老路径,避免视觉抖动。
                     }
                     // 同一 call_id 多次 chunk:后到的覆盖(genai 已合并 args)。
                     tool_bufs.insert(call.call_id.clone(), call);
@@ -2181,6 +2287,53 @@ pub async fn generate_byop_output(
             );
         }
 
+        // 优化 2 诊断:聚合 chunk 间隔分布(p50/p95/max + 平均字节)。
+        // 用户体感"一卡一卡"时,看这一行就能判定根因:
+        // - p50 < 50ms 字节均小:链路健康(opencode 同代理也会一样,渲染层瓶颈)
+        // - p50 200~1000ms:**上游/代理 buffering**,代码层无解,换 endpoint
+        // - p50 < 100ms 但 max 跳到 500ms+:provider 偶发 burst,可接受
+        fn percentile(sorted: &[u64], p: f64) -> u64 {
+            if sorted.is_empty() {
+                return 0;
+            }
+            let idx = ((sorted.len() as f64) * p).min(sorted.len() as f64 - 1.) as usize;
+            sorted[idx]
+        }
+        if !text_intervals_ms.is_empty() {
+            // 第 1 帧 interval = 0(无前帧),不参与分布。
+            let mut sorted: Vec<u64> = text_intervals_ms.iter().skip(1).copied().collect();
+            sorted.sort_unstable();
+            let avg_bytes =
+                if chunk_count > 0 { chunk_bytes / chunk_count as usize } else { 0 };
+            log::info!(
+                "[byop][stream] text_chunk_pacing: count={c} avg_bytes={a}B \
+                 interval_ms p50={p50} p95={p95} max={max}",
+                c = chunk_count,
+                a = avg_bytes,
+                p50 = percentile(&sorted, 0.5),
+                p95 = percentile(&sorted, 0.95),
+                max = sorted.last().copied().unwrap_or(0),
+            );
+        }
+        if !reasoning_intervals_ms.is_empty() {
+            let mut sorted: Vec<u64> = reasoning_intervals_ms.iter().skip(1).copied().collect();
+            sorted.sort_unstable();
+            let avg_bytes = if reasoning_count > 0 {
+                reasoning_bytes / reasoning_count as usize
+            } else {
+                0
+            };
+            log::info!(
+                "[byop][stream] reasoning_chunk_pacing: count={c} avg_bytes={a}B \
+                 interval_ms p50={p50} p95={p95} max={max}",
+                c = reasoning_count,
+                a = avg_bytes,
+                p50 = percentile(&sorted, 0.5),
+                p95 = percentile(&sorted, 0.95),
+                max = sorted.last().copied().unwrap_or(0),
+            );
+        }
+
         // 流结束:把累积的 tool_calls 一次性发出。
         let mut final_messages: Vec<api::Message> = Vec::new();
         for call in tool_bufs.into_values() {
@@ -2188,28 +2341,37 @@ pub async fn generate_byop_output(
             // (call_id / fn_name / fn_arguments JSON 原文 + 类型标注),
             // 便于核对模型是否按 schema 出入参(常见问题:bool 字段被字符串化、
             // 数字被加引号、嵌套对象塌成字符串等)。
-            let args_repr = if call.fn_arguments.is_string() {
-                format!("string({:?})", call.fn_arguments.as_str().unwrap_or(""))
-            } else {
-                format!(
-                    "{}({})",
-                    match &call.fn_arguments {
-                        Value::Object(_) => "object",
-                        Value::Array(_) => "array",
-                        Value::Bool(_) => "bool",
-                        Value::Number(_) => "number",
-                        Value::Null => "null",
-                        Value::String(_) => "string",
-                    },
-                    call.fn_arguments
-                )
-            };
+            // debug 级:只在排查 schema 问题时开 RUST_LOG=debug,平时不污染 INFO。
+            // info 级保留一行不带 args 的简短摘要,便于看流式时序。
             log::info!(
-                "[byop] tool_call_in: name={} call_id={} args={}",
+                "[byop] tool_call_in: name={} call_id={}",
                 call.fn_name,
                 call.call_id,
-                args_repr,
             );
+            if log::log_enabled!(log::Level::Debug) {
+                let args_repr = if call.fn_arguments.is_string() {
+                    format!("string({:?})", call.fn_arguments.as_str().unwrap_or(""))
+                } else {
+                    format!(
+                        "{}({})",
+                        match &call.fn_arguments {
+                            Value::Object(_) => "object",
+                            Value::Array(_) => "array",
+                            Value::Bool(_) => "bool",
+                            Value::Number(_) => "number",
+                            Value::Null => "null",
+                            Value::String(_) => "string",
+                        },
+                        call.fn_arguments
+                    )
+                };
+                log::debug!(
+                    "[byop] tool_call_in_args: name={} call_id={} args={}",
+                    call.fn_name,
+                    call.call_id,
+                    args_repr,
+                );
+            }
 
             // OpenWarp BYOP web 工具拦截:webfetch / websearch 不映射到 protobuf
             // executor variant,在这里直接跑本地 HTTP,合成 (carrier ToolCall,
@@ -2337,6 +2499,22 @@ pub async fn generate_byop_output(
                             vec!["tool_call".to_owned()],
                         ));
                     } else {
+                        // P1-4 诊断:stream 全程 chunk 都 parse 失败 → End 时才兜底 emit。
+                        // 用户感知为"BYOP 调用前长时间无 UI 反馈"。chunks_seen 高时尤其明显。
+                        // schema/coerce 仍能成功说明 chunk 切片单看不是合法 JSON、必须等到 End
+                        // captured_content 拿到完整 args 才能 parse —— provider 端流式行为问题,
+                        // 非本侧 bug,但这条 log 是排查"卡住没反馈"投诉的第一手依据。
+                        let chunks_seen =
+                            tool_chunk_seen.get(&call.call_id).copied().unwrap_or(0);
+                        if chunks_seen > 0 {
+                            log::warn!(
+                                "[byop] tool_placeholder_late: name={} call_id={} \
+                                 chunks_seen={} — stream 全程未能 parse,UI 反馈延迟到 End",
+                                call.fn_name,
+                                call.call_id,
+                                chunks_seen,
+                            );
+                        }
                         final_messages.push(make_tool_call_message(
                             &current_task_id,
                             &request_id,
