@@ -1855,7 +1855,6 @@ keybinding-desc-input-edit-prompt = Edit Prompt
 keybinding-desc-terminal-attach-block-as-context = Attach Selected Block as Agent Context
 keybinding-desc-terminal-attach-text-as-context = Attach Selected Text as Agent Context
 keybinding-desc-terminal-attach-as-context-menu = Attach Selection as Agent Context
-keybinding-desc-workspace-write-codebase-index = Write current codebase index snapshot
 keybinding-desc-workspace-init-project = Initiate project for warp
 keybinding-desc-workspace-add-current-folder = Add current folder as project
 
@@ -1951,7 +1950,6 @@ keybinding-desc-terminal-toggle-block-filter = Toggle block filter on selected o
 keybinding-desc-terminal-toggle-sticky-command-header = Toggle Sticky Command Header in Active Pane
 keybinding-desc-terminal-toggle-autoexecute-mode = Toggle Auto-execute Mode
 keybinding-desc-terminal-toggle-queue-next-prompt = Toggle Queue Next Prompt
-keybinding-desc-terminal-generate-codebase-index = [Debug] Generate codebase index
 
 # Pane group bindings
 keybinding-desc-pane-group-close-current-session = Close Current Session
@@ -2439,7 +2437,6 @@ slash-cmd-rename-tab-hint = <tab name>
 slash-cmd-fork-desc = Fork the current conversation in a new pane or a new tab
 slash-cmd-fork-hint = <optional prompt to send in forked conversation>
 slash-cmd-open-code-review-desc = Open code review
-slash-cmd-index-desc = Index this codebase
 slash-cmd-init-desc = Index this codebase and generate an AGENTS.md file
 slash-cmd-open-project-rules-desc = Open the project rules file (AGENTS.md)
 slash-cmd-open-mcp-servers-desc = Open MCP servers

@@ -1777,7 +1777,6 @@ keybinding-desc-input-edit-prompt = 编辑 Prompt
 keybinding-desc-terminal-attach-block-as-context = 将所选块作为 Agent 上下文附加
 keybinding-desc-terminal-attach-text-as-context = 将所选文本作为 Agent 上下文附加
 keybinding-desc-terminal-attach-as-context-menu = 将所选内容作为 Agent 上下文附加
-keybinding-desc-workspace-write-codebase-index = 写入当前代码库索引快照
 keybinding-desc-workspace-init-project = 为 Warp 初始化项目
 keybinding-desc-workspace-add-current-folder = 将当前文件夹添加为项目
 
@@ -1873,7 +1872,6 @@ keybinding-desc-terminal-toggle-block-filter = 在所选或最近的命令块上
 keybinding-desc-terminal-toggle-sticky-command-header = 在当前面板切换粘性命令头
 keybinding-desc-terminal-toggle-autoexecute-mode = 切换自动执行模式
 keybinding-desc-terminal-toggle-queue-next-prompt = 切换排队下一条 Prompt
-keybinding-desc-terminal-generate-codebase-index = [调试] 生成代码库索引
 
 # 面板组相关 binding
 keybinding-desc-pane-group-close-current-session = 关闭当前会话
@@ -2362,7 +2360,6 @@ slash-cmd-rename-tab-hint = <标签页名称>
 slash-cmd-fork-desc = 在新窗格或新标签页中分叉当前对话
 slash-cmd-fork-hint = <可选:在分叉后的对话中发送的提示词>
 slash-cmd-open-code-review-desc = 打开代码评审
-slash-cmd-index-desc = 索引此代码库
 slash-cmd-init-desc = 索引此代码库并生成 AGENTS.md 文件
 slash-cmd-open-project-rules-desc = 打开项目规则文件(AGENTS.md)
 slash-cmd-open-mcp-servers-desc = 打开 MCP 服务器

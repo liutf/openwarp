@@ -148,17 +148,6 @@ pub static OPEN_CODE_REVIEW: LazyLock<StaticCommand> = LazyLock::new(|| StaticCo
     argument: None,
 });
 
-pub static INDEX: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
-    name: "/index",
-    description: t_static!("slash-cmd-index-desc"),
-    icon_path: "bundled/svg/find-all.svg",
-    availability: Availability::REPOSITORY
-        .union(Availability::CODEBASE_CONTEXT)
-        .union(Availability::AI_ENABLED),
-    auto_enter_ai_mode: false,
-    argument: None,
-});
-
 pub static INIT: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
     name: "/init",
     description: t_static!("slash-cmd-init-desc"),
@@ -471,7 +460,6 @@ fn all_commands() -> Vec<StaticCommand> {
         ADD_MCP.clone(),
         ADD_PROMPT.clone(),
         ADD_RULE.clone(),
-        INDEX.clone(),
         INIT.clone(),
         OPEN_PROJECT_RULES.clone(),
         OPEN_MCP_SERVERS.clone(),

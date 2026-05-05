@@ -24262,10 +24262,8 @@ impl TypedActionView for TerminalView {
             | OpenTeamSettingsPage
             | SelectAgenticSuggestion(_)
             | HideTelemetryBannerPermanently
-            | GenerateCodebaseIndex
             | LoadAgentModeConversation
             | DeleteAttachment { .. }
-            | WriteCodebaseIndex
             | ToggleAutoexecuteMode
             | ToggleQueueNextPrompt
             | ToggleTodoPopup
@@ -24273,7 +24271,6 @@ impl TypedActionView for TerminalView {
             | ToggleCodeReviewPane { .. }
             | OpenProjectRulesPane
             | InitProject
-            | IndexProjectSpeedbump
             | OpenViewMCPPane
             | OpenAddMCPPane
             | OpenAddRulePane
@@ -24942,9 +24939,6 @@ impl TypedActionView for TerminalView {
             }
             HideTelemetryBannerPermanently => self.hide_telemetry_banner_permanently(ctx),
             ShowInitializationBlock => self.show_initialization_block(),
-            GenerateCodebaseIndex => {
-                self.generate_codebase_index(ctx);
-            }
             LoadAgentModeConversation => {
                 self.load_agent_mode_conversation(ctx);
             }
@@ -24953,9 +24947,6 @@ impl TypedActionView for TerminalView {
                 self.ai_context_model.update(ctx, |context_model, ctx| {
                     context_model.remove_pending_attachment(*index, ctx);
                 });
-            }
-            WriteCodebaseIndex => {
-                self.write_codebase_index(ctx);
             }
             ToggleAutoexecuteMode => {
                 // If there's a pending (blocked) requested code diff, accept it first.
@@ -25109,30 +25100,6 @@ impl TypedActionView for TerminalView {
                 self.open_environment_management_pane(ctx);
             }
             SummarizeConversation => self.summarize_conversation(ctx),
-            IndexProjectSpeedbump => {
-                let codebase_context_enabled =
-                    UserWorkspaces::as_ref(ctx).is_codebase_context_enabled(ctx);
-
-                if FeatureFlag::FullSourceCodeEmbedding.is_enabled() && codebase_context_enabled {
-                    #[cfg(feature = "local_fs")]
-                    if let Some(current_dir) = self.pwd() {
-                        let directory = PathBuf::from(&current_dir);
-
-                        if let Ok(repo_path) = directory.canonicalize() {
-                            // Start indexing the codebase
-                            CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
-                                manager.index_directory(repo_path.clone(), ctx);
-                            });
-
-                            self.remove_codebase_index_speedbump_banner(ctx);
-                            self.insert_codebase_index_speedbump_banner(
-                                repo_path, true, /* show_is_indexing */
-                                ctx,
-                            );
-                        }
-                    }
-                }
-            }
             AddProjectAtCurrentDirectory => {
                 // Get the current working directory and add it as a project
                 if let Some(current_dir) = self.pwd() {
