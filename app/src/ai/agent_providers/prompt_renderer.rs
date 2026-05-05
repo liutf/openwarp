@@ -194,6 +194,10 @@ struct PromptContext {
     project_rules: Vec<ProjectRuleCtx>,
     current_time: String,
     model_id: String,
+    /// 本轮真正喂给上游模型的 tool name 列表(由 `chat_stream::available_tool_names`
+    /// 计算,含 gating 后的内置 tools 和当前 MCP tools)。
+    /// 模板按此动态渲染白名单,不再硬编码。
+    available_tools: Vec<String>,
 }
 
 fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptContext {
@@ -285,10 +289,16 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
 ///
 /// `ctx` 一般来自 `params.input` 中最近一条 `AIAgentInput::UserQuery.context`。
 /// 拿不到 context(空数组)也 OK — 模板会用 default 占位渲染。
-pub fn render_system(model: &LLMId, ctx: &[AIAgentContext]) -> String {
+///
+/// `available_tools` 由 `chat_stream::available_tool_names` 计算,本轮实际暴露给
+/// 上游 LLM 的工具名列表(内置 + MCP,已应用 gating)。模板按此动态渲染白名单,
+/// 不要再硬编码"unavailable tools"黑名单 —— 模型看不到的工具自然不会调,
+/// 反过来用文本黑名单会让模型连真实可用的工具也不敢调。
+pub fn render_system(model: &LLMId, ctx: &[AIAgentContext], available_tools: &[String]) -> String {
     let model_id = model_id_from_llm_id(model);
     let template_name = pick_template(&model_id);
-    let prompt_ctx = collect_prompt_context(&model_id, ctx);
+    let mut prompt_ctx = collect_prompt_context(&model_id, ctx);
+    prompt_ctx.available_tools = available_tools.to_vec();
 
     let env = env();
     let tmpl = match env.get_template(template_name) {
@@ -398,7 +408,7 @@ mod tests {
                 shell_version: Some("5.1".into()),
             }),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[]);
         assert!(
             out.contains("Working directory: /home/user/project"),
             "{out}"
@@ -422,7 +432,7 @@ mod tests {
             "deepseek-chat",
             "weird-model",
         ] {
-            let out = render_system(&LLMId::from(format!("byop:p:{id}").as_str()), &[]);
+            let out = render_system(&LLMId::from(format!("byop:p:{id}").as_str()), &[], &[]);
             assert!(
                 out.contains("OpenWarp"),
                 "id={id} should mention OpenWarp, got: {out}"
@@ -432,7 +442,7 @@ mod tests {
 
     #[test]
     fn render_omits_skills_block_when_empty() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[]);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[]);
         // 没 skills 时 skills 区块不应出现
         assert!(
             !out.contains("Skills provide specialized instructions"),
@@ -443,7 +453,34 @@ mod tests {
     #[test]
     fn fallback_does_not_panic() {
         // render_system 永远不会 panic,失败也走 fallback_system
-        let out = render_system(&LLMId::from("byop:p:any"), &[]);
+        let out = render_system(&LLMId::from("byop:p:any"), &[], &[]);
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn render_lists_available_tools_dynamically() {
+        // 传入的 tool 名字必须出现在 system prompt 里(动态白名单)
+        let tools: Vec<String> = vec![
+            "run_shell_command".into(),
+            "webfetch".into(),
+            "websearch".into(),
+            "mcp__github__create_issue".into(),
+        ];
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools);
+        for name in &tools {
+            assert!(out.contains(name), "expected `{name}` in prompt, got: {out}");
+        }
+        // 不应再出现旧黑名单措辞
+        assert!(
+            !out.contains("Do not call unavailable tools"),
+            "黑名单段已删除: {out}"
+        );
+    }
+
+    #[test]
+    fn render_omits_tool_list_when_empty() {
+        // tool_names 为空(理论上不会发生,兜底:不渲染白名单段)
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[]);
+        assert!(!out.contains("Available Tools"), "{out}");
     }
 }

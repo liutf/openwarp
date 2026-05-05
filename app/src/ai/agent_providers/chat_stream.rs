@@ -422,7 +422,8 @@ fn build_chat_request(
     model_id: &str,
 ) -> ChatRequest {
     let agent_ctx = latest_input_context(&params.input);
-    let mut system_text = prompt_renderer::render_system(&params.model, agent_ctx);
+    let tool_names = available_tool_names(params);
+    let mut system_text = prompt_renderer::render_system(&params.model, agent_ctx, &tool_names);
     // OpenWarp:legacy SSH 会话画像补丁。`render_system` 走 AIAgentContext,
     // 拿到的 OS/shell 是本地客户端;legacy SSH 下 PTY 实际在远端,
     // 追加一段 SSH 状态块矫正 LLM 推断。
@@ -1344,6 +1345,39 @@ fn serialize_outgoing_tool_call(
 // ---------------------------------------------------------------------------
 // Tools 数组
 // ---------------------------------------------------------------------------
+
+/// 列出本轮真正会喂给上游模型的 tool name(内置 REGISTRY + 当前 MCP 工具),
+/// 与 `build_tools_array` 共享同一套 gating(LRC / `web_search_enabled` /
+/// `suggest_new_conversation`)。供 `prompt_renderer` 注入到 system prompt,
+/// 让模板按实际可用列表动态渲染,不再硬编码白/黑名单。
+pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
+    let is_lrc = params.lrc_command_id.is_some();
+    let web_enabled = params.web_search_enabled;
+    let mut names: Vec<String> = tools::REGISTRY
+        .iter()
+        .filter(|t| {
+            if is_lrc && t.name == "run_shell_command" {
+                return false;
+            }
+            if !web_enabled
+                && (t.name == tools::webfetch::TOOL_NAME || t.name == tools::websearch::TOOL_NAME)
+            {
+                return false;
+            }
+            if t.name == "suggest_new_conversation" {
+                return false;
+            }
+            true
+        })
+        .map(|t| t.name.to_owned())
+        .collect();
+    if let Some(ctx) = params.mcp_context.as_ref() {
+        for (name, _description, _parameters) in tools::mcp::build_mcp_tool_defs(ctx) {
+            names.push(name);
+        }
+    }
+    names
+}
 
 fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // OpenWarp A2:LRC tag-in 场景剔除 `run_shell_command`,迫使模型选 PTY 操作类工具。

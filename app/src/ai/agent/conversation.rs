@@ -1370,6 +1370,8 @@ impl AIConversation {
                 response_stream_id: Some(stream_id.clone()),
             });
         }
+        // turn 启动即落盘:user query 提交时先写一次,stream 中途强退也能保留提问记录。
+        self.write_updated_conversation_state(ctx);
         Ok(())
     }
 
@@ -2000,6 +2002,7 @@ impl AIConversation {
             }
             Action::CommitTransaction(_) => {
                 self.commit_transaction();
+                self.write_updated_conversation_state(ctx);
             }
             Action::RollbackTransaction(_) => {
                 log::debug!("Rollback transaction.");
@@ -2400,6 +2403,7 @@ impl AIConversation {
                     conversation_id: self.id,
                     is_hidden: self.is_exchange_hidden(exchange_id),
                 });
+                self.write_updated_conversation_state(ctx);
             }
             Action::UpdateTaskServerData(UpdateTaskServerData {
                 task_id,
@@ -2459,6 +2463,7 @@ impl AIConversation {
                     conversation_id: self.id,
                     is_hidden: self.is_exchange_hidden(exchange_id),
                 });
+                self.write_updated_conversation_state(ctx);
             }
             Action::AppendToMessageContent(AppendToMessageContent {
                 task_id,
@@ -2522,6 +2527,7 @@ impl AIConversation {
                     conversation_id: self.id,
                     is_hidden: self.is_exchange_hidden(exchange_id),
                 });
+                // streaming chunk delta 不落盘,落盘只在 part / message 边界发生。
             }
             Action::ShowSuggestions(suggestions) => {
                 let exchange_id = self
@@ -2589,6 +2595,10 @@ impl AIConversation {
                 // intentionally keep the UI unchanged during a live session. The
                 // exchange's client representation (added_message_ids) remains
                 // unmodified, pointing to message IDs that now exist in a subtask.
+
+                // 任务结构变化必须落盘,否则重启时 task 树和 conversation_data
+                // 不一致会被 `is_restorable` 过滤丢弃整条会话。
+                self.write_updated_conversation_state(ctx);
             }
             Action::StartNewConversation(_) => {
                 // New conversations are handled at the BlocklistAIHistoryModel layer
@@ -2776,8 +2786,7 @@ impl AIConversation {
             return;
         }
 
-        // Check if session restoration is enabled before writing any state.
-        if !*GeneralSettings::as_ref(ctx).restore_session
+        if !*GeneralSettings::as_ref(ctx).persist_conversations
             || !AppExecutionMode::as_ref(ctx).can_save_session()
         {
             return;
