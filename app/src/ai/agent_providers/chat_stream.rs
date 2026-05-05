@@ -222,11 +222,31 @@ fn xml_attr(s: &str) -> String {
 /// 累积同一 assistant turn 的 text + tool_calls + reasoning,然后 flush 成一个或两个
 /// `ChatMessage`(text 一个,tool_calls 一个 — genai 把它们建模为分开的 message)。
 ///
-/// **thinking-mode reasoning_content 回传**:对 DeepSeek / Kimi 这类要求"每条
-/// assistant 都必须回传 reasoning_content 字段"的 adapter,buf 持有 `force_echo=true`,
-/// flush 时即使本 turn 没攒到 reasoning 也会挂一个非空占位 — genai 序列化层
-/// (`adapter_shared.rs:368-373`) 只看 `ContentPart::ReasoningContent` 是否存在。
-/// 其他 adapter(Anthropic / Gemini)`force_echo=false`,行为退化为旧逻辑(reasoning 非空才挂)。
+/// **thinking-mode reasoning_content 回传 gate**(双向)。
+///
+/// `force_echo_reasoning` 同时控制两件事,语义统一为「这个 endpoint 接受/需要
+/// `reasoning_content` 顶层字段」:
+///
+/// - `true`(DeepSeek api_type / OpenAI+kimi|moonshot):每条 assistant 必挂
+///   `reasoning_content`(有真实 reasoning 用之,无则挂非空占位)— 满足
+///   DeepSeek-v4-flash / Kimi 等 thinking-mode 服务端「字段必须存在」校验。
+/// - `false`(其他):**即便 stream 收到了真实 reasoning_content,回放时也丢弃**,
+///   不在历史 assistant 上挂 `with_reasoning_content`。
+///
+/// 为什么 `false` 时也要主动丢弃真实 reasoning:许多 OpenAI-strict provider 把
+/// `messages[].reasoning_content` 视为非法字段并 400(`code: wrong_api_format`):
+///
+/// - **Cerebras**(zerx-lab/warp #25 元凶,zai-glm-4.7 第二轮 400)
+/// - **Groq**(协议侧用 `reasoning_format` / `include_reasoning`,不接受 message 字段)
+/// - **OpenRouter / Together AI / SambaNova / Anyscale / Replicate** 等中转/inference 厂商
+/// - **OpenAI 官方**(GPT-5/o-series 走 OpenAIResp,o-series 用 `reasoning.encrypted_content`,不收 `reasoning_content`)
+///
+/// genai 0.6 OpenAI adapter `adapter_shared.rs:367,385-387` 见到
+/// `ContentPart::ReasoningContent` 就**无条件** hoist 出顶层 `reasoning_content`
+/// 字段,所以 gate 必须前移到 client 侧 — 即「不挂 ContentPart 就不会被序列化」。
+///
+/// Anthropic / Gemini adapter 序列化层会忽略 `ContentPart::ReasoningContent`
+/// (各自走 thinking blocks / thought signature),不受这个 gate 影响,但保持一致仍走 `false` 分支不挂。
 const REASONING_ECHO_PLACEHOLDER: &str = " ";
 
 #[derive(Default)]
@@ -253,14 +273,25 @@ impl AssistantBuffer {
     fn flush_into(&mut self, messages: &mut Vec<ChatMessage>) {
         let reasoning = self.reasoning.take();
         let has_tool_calls = !self.tool_calls.is_empty();
-        // 决定本次 flush 要挂到 tool_calls assistant 上的 reasoning 字符串:
-        // - 有真实 reasoning 文本 → 用之
-        // - 没有 + force_echo → 非空占位(满足 DeepSeek/Kimi 服务端"字段必须存在"的校验)
-        // - 没有 + 不 force_echo → None(不挂字段,跟旧行为一致)
-        let echo_reasoning: Option<String> = match reasoning {
-            Some(r) if !r.is_empty() => Some(r),
-            _ if self.force_echo_reasoning => Some(REASONING_ECHO_PLACEHOLDER.to_owned()),
-            _ => None,
+        // 决定本次 flush 要挂到 assistant message 上的 reasoning 字符串。
+        //
+        // **gate 反转**:`force_echo_reasoning = false` 时**一律不挂**,即使本 turn
+        // stream 收到了真实 reasoning(zai-glm / qwen3-thinking 这类 thinking 模型走
+        // OpenAI 兼容路径会 emit reasoning_content chunk)— 因为 Cerebras / Groq /
+        // OpenRouter 等 OpenAI-strict provider 见到 `messages[].reasoning_content` 直接
+        // 400 `wrong_api_format`(zerx-lab/warp #25)。
+        //
+        // `force_echo_reasoning = true` 时(DeepSeek api_type / OpenAI+kimi/moonshot):
+        // - 有真实 reasoning → 用之
+        // - 没有 → 非空占位(满足"字段必须存在"校验)
+        let echo_reasoning: Option<String> = if self.force_echo_reasoning {
+            match reasoning {
+                Some(r) if !r.is_empty() => Some(r),
+                _ => Some(REASONING_ECHO_PLACEHOLDER.to_owned()),
+            }
+        } else {
+            // 注:即便 `reasoning` 是 Some(非空),也丢弃 — 见上方 gate 反转说明。
+            None
         };
         if let Some(t) = self.text.take() {
             let mut msg = ChatMessage::assistant(t);
@@ -1486,8 +1517,53 @@ pub(super) fn build_client(
         .build()
 }
 
+/// 判定是否给 DashScope(阿里云百炼,OpenAI 兼容路径)注入 `enable_thinking: true`。
+///
+/// 对齐 opencode `transform.ts:931-938`(provider/transform.ts L926+ 的注释):
+/// 「DashScope 默认不开 thinking,qwen3 / qwq / deepseek-r1 / kimi-k2.5 / qwen-plus
+/// 等 reasoning 模型必须显式 `enable_thinking: true` 才会输出 reasoning_content」。
+///
+/// 命中条件(全部满足):
+/// 1. `api_type == OpenAi`(DashScope 走 OpenAI 兼容路径)
+/// 2. `effort_setting != Off`(用户主动关思考时尊重之,不注入)
+/// 3. base_url 含 `dashscope.aliyuncs.com` / `dashscope.cn` / `dashscope-intl.aliyuncs.com`
+/// 4. model_id 不含 `kimi-k2-thinking`(opencode 排除,该模型默认就 thinking)
+/// 5. model_id 命中 reasoning 子串白名单:`qwen3` / `qwq` / `deepseek-r1` / `kimi-k2.5` /
+///    `kimi-k2-` / `qwen-plus`(避免给 qwen-turbo / qwen2.5 等纯 chat 模型乱塞)
+fn dashscope_needs_enable_thinking(
+    api_type: AgentProviderApiType,
+    base_url: &str,
+    model_id: &str,
+    effort_setting: crate::settings::ReasoningEffortSetting,
+) -> bool {
+    if !matches!(api_type, AgentProviderApiType::OpenAi) {
+        return false;
+    }
+    if matches!(effort_setting, crate::settings::ReasoningEffortSetting::Off) {
+        return false;
+    }
+    let url = base_url.to_ascii_lowercase();
+    let is_dashscope = url.contains("dashscope.aliyuncs.com")
+        || url.contains("dashscope.cn")
+        || url.contains("dashscope-intl.aliyuncs.com");
+    if !is_dashscope {
+        return false;
+    }
+    let id = model_id.to_ascii_lowercase();
+    if id.contains("kimi-k2-thinking") {
+        return false;
+    }
+    id.contains("qwen3")
+        || id.contains("qwq")
+        || id.contains("deepseek-r1")
+        || id.contains("kimi-k2.5")
+        || id.contains("kimi-k2-")
+        || id.contains("qwen-plus")
+}
+
 fn build_chat_options(
     api_type: AgentProviderApiType,
+    base_url: &str,
     model_id: &str,
     effort_setting: crate::settings::ReasoningEffortSetting,
 ) -> ChatOptions {
@@ -1529,6 +1605,19 @@ fn build_chat_options(
             );
         }
     }
+
+    // DashScope(阿里云百炼)OpenAI 兼容路径需显式 `enable_thinking: true` 才会
+    // 输出 reasoning。详见 `dashscope_needs_enable_thinking` 注释。
+    // 与上面 DeepSeek Off 的 extra_body 互斥(DeepSeek 走 DeepSeek api_type,
+    // DashScope 走 OpenAI api_type),不会同时 fire。
+    if dashscope_needs_enable_thinking(api_type, base_url, model_id, effort_setting) {
+        log::info!(
+            "[byop] DashScope reasoning model → extra_body enable_thinking=true \
+             (model={model_id} setting={effort_setting:?})"
+        );
+        opts = opts.with_extra_body(json!({"enable_thinking": true}));
+    }
+
     opts
 }
 
@@ -1607,7 +1696,7 @@ pub async fn generate_byop_output(
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
     let force_echo_reasoning = super::reasoning::model_requires_reasoning_echo(api_type, &model_id);
     let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, &model_id);
-    let chat_opts = build_chat_options(api_type, &model_id, reasoning_effort);
+    let chat_opts = build_chat_options(api_type, &base_url, &model_id, reasoning_effort);
     let client = build_client(api_type, base_url, api_key);
     let conversation_id = params
         .conversation_token
@@ -3114,5 +3203,215 @@ fn make_finished_done(
                 request_cost: None,
             },
         )),
+    }
+}
+
+#[cfg(test)]
+mod assistant_buffer_tests {
+    use super::*;
+    use genai::chat::{ChatRole, ToolCall};
+
+    fn reasoning_part(msg: &ChatMessage) -> Option<&str> {
+        for p in msg.content.parts() {
+            if let ContentPart::ReasoningContent(r) = p {
+                return Some(r.as_str());
+            }
+        }
+        None
+    }
+
+    /// gate=false + 真实 reasoning → **丢弃**(zerx-lab/warp #25 修复点)。
+    /// Cerebras / Groq / OpenRouter 等 OpenAI-strict provider 见到字段就 400。
+    #[test]
+    fn no_echo_drops_real_reasoning_text() {
+        let mut buf = AssistantBuffer::new(false);
+        buf.text = Some("Hi".to_string());
+        buf.reasoning = Some("internal thought".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, ChatRole::Assistant);
+        assert!(reasoning_part(&msgs[0]).is_none(), "must not echo reasoning");
+    }
+
+    /// gate=false + tool_calls + 真实 reasoning → tool_calls 这条也不挂 reasoning。
+    #[test]
+    fn no_echo_drops_reasoning_on_tool_calls_message() {
+        let mut buf = AssistantBuffer::new(false);
+        buf.text = Some("calling".to_string());
+        buf.tool_calls = vec![ToolCall {
+            call_id: "c1".to_string(),
+            fn_name: "echo".to_string(),
+            fn_arguments: serde_json::json!({}),
+            thought_signatures: None,
+        }];
+        buf.reasoning = Some("planning".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 2, "text + tool_calls flush 成两条");
+        for m in &msgs {
+            assert!(reasoning_part(m).is_none(), "any-msg reasoning must be absent");
+        }
+    }
+
+    /// gate=true + 真实 reasoning → 挂真实值(DeepSeek / Kimi 路径)。
+    #[test]
+    fn echo_keeps_real_reasoning() {
+        let mut buf = AssistantBuffer::new(true);
+        buf.text = Some("ok".to_string());
+        buf.reasoning = Some("thinking...".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(reasoning_part(&msgs[0]), Some("thinking..."));
+    }
+
+    /// gate=true + 无 reasoning → 挂占位符(满足"字段必须存在"校验)。
+    #[test]
+    fn echo_inserts_placeholder_when_empty() {
+        let mut buf = AssistantBuffer::new(true);
+        buf.text = Some("ok".to_string());
+        buf.reasoning = None;
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(reasoning_part(&msgs[0]), Some(REASONING_ECHO_PLACEHOLDER));
+    }
+
+    /// gate=true + tool_calls + 真实 reasoning → text 这条占位,tool_calls 那条挂真实值。
+    #[test]
+    fn echo_with_tool_calls_splits_correctly() {
+        let mut buf = AssistantBuffer::new(true);
+        buf.text = Some("calling".to_string());
+        buf.tool_calls = vec![ToolCall {
+            call_id: "c1".to_string(),
+            fn_name: "echo".to_string(),
+            fn_arguments: serde_json::json!({}),
+            thought_signatures: None,
+        }];
+        buf.reasoning = Some("plan".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 2);
+        // text 这条:占位
+        assert_eq!(reasoning_part(&msgs[0]), Some(REASONING_ECHO_PLACEHOLDER));
+        // tool_calls 这条:真实 reasoning + 含 ToolCall part
+        assert_eq!(reasoning_part(&msgs[1]), Some("plan"));
+        assert!(
+            !msgs[1].content.tool_calls().is_empty(),
+            "second message must carry tool_calls"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dashscope_thinking_tests {
+    use super::*;
+    use crate::settings::ReasoningEffortSetting as R;
+
+    const DASHSCOPE_CN: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1/";
+    const DASHSCOPE_INTL: &str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/";
+
+    #[test]
+    fn dashscope_qwen3_triggers() {
+        assert!(dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen3-235b-a22b",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn dashscope_qwq_triggers() {
+        assert!(dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_INTL,
+            "qwq-32b",
+            R::Medium
+        ));
+    }
+
+    #[test]
+    fn dashscope_deepseek_r1_triggers() {
+        assert!(dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "deepseek-r1",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn dashscope_kimi_k2_thinking_excluded() {
+        // opencode 注释:kimi-k2-thinking 默认就开,不重复注入
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "kimi-k2-thinking",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn dashscope_off_setting_skips() {
+        // 用户主动关思考时尊重之
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen3-30b",
+            R::Off
+        ));
+    }
+
+    #[test]
+    fn dashscope_non_reasoning_model_skips() {
+        // qwen-turbo / qwen2.5 等纯 chat 模型不该被注入
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen-turbo",
+            R::High
+        ));
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen2.5-72b",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn non_dashscope_url_skips() {
+        // OpenAI / Cerebras / Groq 等不是 DashScope 的 base_url
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            "https://api.openai.com/v1/",
+            "qwen3-30b",
+            R::High
+        ));
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            "https://api.cerebras.ai/v1/",
+            "qwen3-30b",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn non_openai_api_type_skips() {
+        // Anthropic / Gemini / DeepSeek api_type 不走这条路径
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::Anthropic,
+            DASHSCOPE_CN,
+            "qwen3-30b",
+            R::High
+        ));
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::DeepSeek,
+            DASHSCOPE_CN,
+            "deepseek-r1",
+            R::High
+        ));
     }
 }
