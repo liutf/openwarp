@@ -5211,7 +5211,7 @@ impl AgentsWidget {
                 "Allow the Warp Agent to generate an outline of your codebase that can be used for context. No code is ever stored on our servers. ",
             ),
             FormattedTextFragment::hyperlink(
-                "Learn more",
+                crate::t!("common-learn-more"),
                 "https://docs.warp.dev/agent-platform/capabilities/codebase-context",
             ),
         ];
@@ -5753,7 +5753,7 @@ impl SettingsWidget for MCPServersWidget {
             MCP servers expose data sources or tools to agents through a standardized interface, essentially acting like plugins. ",
             ),
             FormattedTextFragment::hyperlink(
-                "Learn more",
+                crate::t!("common-learn-more"),
                 "https://docs.warp.dev/agent-platform/capabilities/mcp",
             ),
         ];

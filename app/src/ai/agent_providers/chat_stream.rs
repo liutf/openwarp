@@ -2822,16 +2822,17 @@ fn make_web_search_status_from_result(
             .map(extract_search_pages_from_exa_results)
             .unwrap_or_default()
             .into_iter()
-            .map(|(url, title)| {
-                api::message::web_search::status::success::SearchedPage { url, title }
-            })
+            .map(
+                |(url, title)| api::message::web_search::status::success::SearchedPage {
+                    url,
+                    title,
+                },
+            )
             .collect();
-        api::message::web_search::status::Type::Success(
-            api::message::web_search::status::Success {
-                query: query.to_owned(),
-                pages,
-            },
-        )
+        api::message::web_search::status::Type::Success(api::message::web_search::status::Success {
+            query: query.to_owned(),
+            pages,
+        })
     };
     api::Message {
         id: Uuid::new_v4().to_string(),
@@ -2839,7 +2840,9 @@ fn make_web_search_status_from_result(
         server_message_data: String::new(),
         citations: vec![],
         message: Some(api::message::Message::WebSearch(api::message::WebSearch {
-            status: Some(api::message::web_search::Status { r#type: Some(r#type) }),
+            status: Some(api::message::web_search::Status {
+                r#type: Some(r#type),
+            }),
         })),
         request_id: request_id.to_owned(),
         timestamp: None,
@@ -2893,15 +2896,13 @@ fn make_web_fetch_status_from_result(
             .and_then(|v| v.as_u64())
             .map(|c| (200..300).contains(&c))
             .unwrap_or(true);
-        api::message::web_fetch::status::Type::Success(
-            api::message::web_fetch::status::Success {
-                pages: vec![api::message::web_fetch::status::success::FetchedPage {
-                    url,
-                    title: String::new(),
-                    success,
-                }],
-            },
-        )
+        api::message::web_fetch::status::Type::Success(api::message::web_fetch::status::Success {
+            pages: vec![api::message::web_fetch::status::success::FetchedPage {
+                url,
+                title: String::new(),
+                success,
+            }],
+        })
     };
     api::Message {
         id: Uuid::new_v4().to_string(),
@@ -2909,7 +2910,9 @@ fn make_web_fetch_status_from_result(
         server_message_data: String::new(),
         citations: vec![],
         message: Some(api::message::Message::WebFetch(api::message::WebFetch {
-            status: Some(api::message::web_fetch::Status { r#type: Some(r#type) }),
+            status: Some(api::message::web_fetch::Status {
+                r#type: Some(r#type),
+            }),
         })),
         request_id: request_id.to_owned(),
         timestamp: None,
