@@ -58,6 +58,11 @@ fn build_env() -> Environment<'static> {
         include_str!("prompts/partials/footer.j2"),
     )
     .expect("footer partial parses");
+    env.add_template(
+        "partials/plan_mode.j2",
+        include_str!("prompts/partials/plan_mode.j2"),
+    )
+    .expect("plan_mode partial parses");
 
     // 按 model id 子串匹配分发 system prompt(对齐 opencode
     // `packages/opencode/src/session/system.ts::provider`)。OpenRouter 路径形如
@@ -198,6 +203,10 @@ struct PromptContext {
     /// 计算,含 gating 后的内置 tools 和当前 MCP tools)。
     /// 模板按此动态渲染白名单,不再硬编码。
     available_tools: Vec<String>,
+    /// 本轮是否处于 `/plan` 触发的 Plan Mode(只读研究模式)。
+    /// 由 `chat_stream::is_plan_mode_turn` 计算,模板按此 include
+    /// `partials/plan_mode.j2` 注入只读约束 + 计划产出引导。
+    plan_mode: bool,
 }
 
 fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptContext {
@@ -294,11 +303,17 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
 /// 上游 LLM 的工具名列表(内置 + MCP,已应用 gating)。模板按此动态渲染白名单,
 /// 不要再硬编码"unavailable tools"黑名单 —— 模型看不到的工具自然不会调,
 /// 反过来用文本黑名单会让模型连真实可用的工具也不敢调。
-pub fn render_system(model: &LLMId, ctx: &[AIAgentContext], available_tools: &[String]) -> String {
+pub fn render_system(
+    model: &LLMId,
+    ctx: &[AIAgentContext],
+    available_tools: &[String],
+    plan_mode: bool,
+) -> String {
     let model_id = model_id_from_llm_id(model);
     let template_name = pick_template(&model_id);
     let mut prompt_ctx = collect_prompt_context(&model_id, ctx);
     prompt_ctx.available_tools = available_tools.to_vec();
+    prompt_ctx.plan_mode = plan_mode;
 
     let env = env();
     let tmpl = match env.get_template(template_name) {
@@ -408,7 +423,7 @@ mod tests {
                 shell_version: Some("5.1".into()),
             }),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[]);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false);
         assert!(
             out.contains("Working directory: /home/user/project"),
             "{out}"
@@ -432,7 +447,12 @@ mod tests {
             "deepseek-chat",
             "weird-model",
         ] {
-            let out = render_system(&LLMId::from(format!("byop:p:{id}").as_str()), &[], &[]);
+            let out = render_system(
+                &LLMId::from(format!("byop:p:{id}").as_str()),
+                &[],
+                &[],
+                false,
+            );
             assert!(
                 out.contains("OpenWarp"),
                 "id={id} should mention OpenWarp, got: {out}"
@@ -442,7 +462,7 @@ mod tests {
 
     #[test]
     fn render_omits_skills_block_when_empty() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[]);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
         // 没 skills 时 skills 区块不应出现
         assert!(
             !out.contains("Skills provide specialized instructions"),
@@ -453,7 +473,7 @@ mod tests {
     #[test]
     fn fallback_does_not_panic() {
         // render_system 永远不会 panic,失败也走 fallback_system
-        let out = render_system(&LLMId::from("byop:p:any"), &[], &[]);
+        let out = render_system(&LLMId::from("byop:p:any"), &[], &[], false);
         assert!(!out.is_empty());
     }
 
@@ -466,7 +486,7 @@ mod tests {
             "websearch".into(),
             "mcp__github__create_issue".into(),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools, false);
         for name in &tools {
             assert!(out.contains(name), "expected `{name}` in prompt, got: {out}");
         }
@@ -480,7 +500,45 @@ mod tests {
     #[test]
     fn render_omits_tool_list_when_empty() {
         // tool_names 为空(理论上不会发生,兜底:不渲染白名单段)
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[]);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
         assert!(!out.contains("Available Tools"), "{out}");
+    }
+
+    #[test]
+    fn plan_mode_off_omits_plan_block() {
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
+        assert!(
+            !out.contains("Plan Mode (Read-Only)"),
+            "plan_mode=false 不应包含 Plan Mode 段: {out}"
+        );
+    }
+
+    #[test]
+    fn plan_mode_on_injects_plan_block_for_all_families() {
+        for id in [
+            "claude-sonnet-4-5",
+            "gpt-4o",
+            "gpt-5-codex",
+            "gemini-2.5-pro",
+            "kimi-k2",
+            "trinity-v1",
+            "deepseek-chat",
+            "weird-model",
+        ] {
+            let out = render_system(
+                &LLMId::from(format!("byop:p:{id}").as_str()),
+                &[],
+                &[],
+                true,
+            );
+            assert!(
+                out.contains("Plan Mode (Read-Only)"),
+                "id={id} plan_mode=true 应包含 Plan Mode 段: {out}"
+            );
+            assert!(
+                out.contains("Stop and wait"),
+                "id={id} plan_mode=true 应包含 Stop and wait 引导: {out}"
+            );
+        }
     }
 }

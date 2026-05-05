@@ -56,7 +56,7 @@ use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget, WebConfig};
 
 use crate::ai::agent::api::{RequestParams, ResponseStream};
-use crate::ai::agent::{AIAgentInput, RunningCommand};
+use crate::ai::agent::{AIAgentInput, RunningCommand, UserQueryMode};
 use crate::ai::byop_compaction;
 use crate::server::server_api::AIApiError;
 use crate::settings::AgentProviderApiType;
@@ -422,8 +422,10 @@ fn build_chat_request(
     model_id: &str,
 ) -> ChatRequest {
     let agent_ctx = latest_input_context(&params.input);
+    let plan_mode = is_plan_mode_turn(&params.input);
     let tool_names = available_tool_names(params);
-    let mut system_text = prompt_renderer::render_system(&params.model, agent_ctx, &tool_names);
+    let mut system_text =
+        prompt_renderer::render_system(&params.model, agent_ctx, &tool_names, plan_mode);
     // OpenWarp:legacy SSH 会话画像补丁。`render_system` 走 AIAgentContext,
     // 拿到的 OS/shell 是本地客户端;legacy SSH 下 PTY 实际在远端,
     // 追加一段 SSH 状态块矫正 LLM 推断。
@@ -1346,13 +1348,58 @@ fn serialize_outgoing_tool_call(
 // Tools 数组
 // ---------------------------------------------------------------------------
 
+/// 本轮 input 是否含 `/plan` 触发的 `UserQueryMode::Plan`。
+///
+/// per-turn 语义:只看本轮 `params.input` 是否带 Plan 标记。历史 task message
+/// 当前的持久化路径(`make_user_query_message`)用 `..Default::default()` 写入
+/// 上游 proto,**不带 mode 字段**;所以 plan 状态不会自动跨轮 sticky,用户每条
+/// 想保持只读的 query 都需重新加 `/plan ` 前缀。这是有意为之的 MVP 形态:
+/// - 实施成本最低(无需改 proto schema、无需新会话级状态机)
+/// - 与 Claude Code `EnterPlanMode` 的"显式进入/退出"语义一致 —— 只是这里把
+///   退出动作隐含在"下一条不带 /plan"
+fn is_plan_mode_turn(input: &[AIAgentInput]) -> bool {
+    input.iter().any(|i| {
+        matches!(
+            i,
+            AIAgentInput::UserQuery {
+                user_query_mode: UserQueryMode::Plan,
+                ..
+            }
+        )
+    })
+}
+
+/// Plan Mode 下硬过滤的写/执行类内置工具名。
+///
+/// 逻辑兜底,即使模型无视 `partials/plan_mode.j2` 的引导也无法触发副作用 ——
+/// 工具不在 tool list 里就调用不到(provider 协议层会直接拒绝 unknown function)。
+///
+/// **没被 BLOCK 的写类工具**:`create_documents` / `edit_documents`。它们只动
+/// Warp Drive 本地文档存储(AIDocumentModel),不碰文件系统、不跑命令,语义上
+/// 恰好是 Plan Mode 的产出归档动作 —— 模型把最终 plan 沉淀为 Drive 文档,
+/// 用户后续可在 Drive UI 中查看 / 编辑 / 拖入自建的 PLAN 文件夹复用。
+///
+/// 留下的只读 + Drive 写子集:`read_files / grep / file_glob_v2 /
+/// read_shell_command_output / ask_user_question / read_skill / read_documents /
+/// create_documents / edit_documents / webfetch / websearch / mcp/*`。
+const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
+    "run_shell_command",
+    "apply_file_diffs",
+    "write_to_long_running_shell_command",
+    "open_code_review",
+    "init_project",
+    "transfer_shell_command_control_to_user",
+    "suggest_prompt",
+];
+
 /// 列出本轮真正会喂给上游模型的 tool name(内置 REGISTRY + 当前 MCP 工具),
 /// 与 `build_tools_array` 共享同一套 gating(LRC / `web_search_enabled` /
-/// `suggest_new_conversation`)。供 `prompt_renderer` 注入到 system prompt,
-/// 让模板按实际可用列表动态渲染,不再硬编码白/黑名单。
+/// `suggest_new_conversation` / `plan_mode`)。供 `prompt_renderer` 注入到
+/// system prompt,让模板按实际可用列表动态渲染,不再硬编码白/黑名单。
 pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
+    let plan_mode = is_plan_mode_turn(&params.input);
     let mut names: Vec<String> = tools::REGISTRY
         .iter()
         .filter(|t| {
@@ -1365,6 +1412,9 @@ pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
                 return false;
             }
             if t.name == "suggest_new_conversation" {
+                return false;
+            }
+            if plan_mode && PLAN_MODE_BLOCKED_TOOLS.contains(&t.name) {
                 return false;
             }
             true
@@ -1396,6 +1446,7 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // 信息收集和反问。
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
+    let plan_mode = is_plan_mode_turn(&params.input);
     // OpenWarp BYOP:`suggest_prompt` chip UI 已通过 view 层订阅
     // PromptSuggestionExecutorEvent 恢复(见 `terminal/view.rs::
     // handle_suggest_prompt_executor_event`),可以暴露给模型。
@@ -1425,6 +1476,13 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
             if t.name == "suggest_new_conversation" {
                 return false;
             }
+            // Plan Mode:`/plan` 触发的只读模式硬护栏,移除写/执行类工具。
+            // 与 system prompt 的 plan_mode.j2 引导双重保险 —— 即便模型无视
+            // 提示词,工具不在列表里也无法触发副作用(provider 协议层
+            // 会直接拒绝 unknown function)。
+            if plan_mode && PLAN_MODE_BLOCKED_TOOLS.contains(&t.name) {
+                return false;
+            }
             true
         })
         .map(|t| {
@@ -1452,6 +1510,14 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
         log::info!(
             "[byop] LRC tag-in: tools array filtered (removed run_shell_command), \
              total tools={}",
+            out.len()
+        );
+    }
+    if plan_mode {
+        log::info!(
+            "[byop] Plan Mode: tools array filtered (removed write/exec tools: {:?}), \
+             total tools={}",
+            PLAN_MODE_BLOCKED_TOOLS,
             out.len()
         );
     }
