@@ -1922,6 +1922,11 @@ pub async fn generate_byop_output(
         // (since 0.4.0 行为),但跨 chunk 同一 call_id 可能多次出现 args 增量,
         // 用 HashMap 按 id 累积后在流末统一 emit。
         let mut tool_bufs: HashMap<String, ToolCall> = HashMap::new();
+        // call_id → 首帧占位 ToolCall message 的 id。
+        // 首次 ToolCallChunk 到达且可解析时立即 emit 一条占位卡(让 UI 在 stream End
+        // 之前就能看到"调用 X 工具"反馈),流末用 update_message 原地刷新为最终 args。
+        // 不在表里的 call_id(首帧 parse 失败 / web 工具)走老路径在 End 后一次性 emit。
+        let mut tool_msg_ids: HashMap<String, String> = HashMap::new();
         // 诊断:统计 stream 各类事件计数,流末打 INFO log。
         // 用于排查"消息静默消失"——如果 chunk_count=0 且 tool_count=0,说明上游返回空内容。
         let mut start_count: u32 = 0;
@@ -2013,6 +2018,33 @@ pub async fn generate_byop_output(
                     // 极个别 provider(自建 ollama 代理等)不发 call_id,本地 uuid 兜底。
                     if call.call_id.is_empty() {
                         call.call_id = Uuid::new_v4().to_string();
+                    }
+                    // 首次见到该 call_id → 立即 emit 一条占位 ToolCall 消息,让 UI 在
+                    // stream End 之前就出现"调用 X 工具"卡片。性能保障:仅"首次出现且
+                    // 可解析"才 yield 一次,后续 chunk 完全静默(只 insert tool_bufs);
+                    // 每 tool 至多 2 次 yield(首帧 + End 终帧)。web 工具走自己的
+                    // loading 帧链路(L2102 区域),这里 skip 避免双卡。
+                    if !tool_msg_ids.contains_key(&call.call_id)
+                        && call.fn_name != tools::webfetch::TOOL_NAME
+                        && call.fn_name != tools::websearch::TOOL_NAME
+                    {
+                        if let Ok(parsed) = parse_incoming_tool_call(&call, mcp_context.as_ref()) {
+                            let msg_id = Uuid::new_v4().to_string();
+                            let mut placeholder = make_tool_call_message(
+                                &current_task_id,
+                                &request_id,
+                                &call.call_id,
+                                parsed,
+                            );
+                            placeholder.id = msg_id.clone();
+                            tool_msg_ids.insert(call.call_id.clone(), msg_id);
+                            yield Ok(make_add_messages_event(
+                                &current_task_id,
+                                vec![placeholder],
+                            ));
+                        }
+                        // parse 失败(args 还不完整 / 未知工具):暂不 emit,
+                        // 等 End 时走老路径,避免视觉抖动。
                     }
                     // 同一 call_id 多次 chunk:后到的覆盖(genai 已合并 args)。
                     tool_bufs.insert(call.call_id.clone(), call);
@@ -2197,12 +2229,32 @@ pub async fn generate_byop_output(
 
             match parse_incoming_tool_call(&call, mcp_context.as_ref()) {
                 Ok(warp_tool) => {
-                    final_messages.push(make_tool_call_message(
-                        &current_task_id,
-                        &request_id,
-                        &call.call_id,
-                        warp_tool,
-                    ));
+                    // 如果 ToolCallChunk 阶段已经 emit 过占位卡(同 call_id),
+                    // 改用 update_message 原地刷新为最终 args(覆盖 chunk 中可能后到
+                    // 的 args delta)。占位与终帧共用同一 message.id,
+                    // task::upsert_message 走 FieldMaskOperation::update,
+                    // task.messages 仍只有一条 → UI 一张卡 in-place 刷新,不双卡。
+                    if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
+                        let mut updated = make_tool_call_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            warp_tool,
+                        );
+                        updated.id = msg_id;
+                        yield Ok(make_update_message_event(
+                            &current_task_id,
+                            updated,
+                            vec!["tool_call".to_owned()],
+                        ));
+                    } else {
+                        final_messages.push(make_tool_call_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            warp_tool,
+                        ));
+                    }
                 }
                 Err(e) => {
                     // 关键:不再把 from_args 失败吞成纯文本(原实现:emit AgentOutput),
