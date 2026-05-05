@@ -148,15 +148,15 @@ pub static OPEN_CODE_REVIEW: LazyLock<StaticCommand> = LazyLock::new(|| StaticCo
     argument: None,
 });
 
+pub const INIT_NAME: &str = "/init";
+
 pub static INIT: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
-    name: "/init",
+    name: INIT_NAME,
     description: t_static!("slash-cmd-init-desc"),
     icon_path: "bundled/svg/warp-2.svg",
-    availability: Availability::REPOSITORY
-        .union(Availability::AGENT_VIEW)
-        .union(Availability::AI_ENABLED),
+    availability: Availability::AI_ENABLED,
     auto_enter_ai_mode: true,
-    argument: None,
+    argument: Some(Argument::optional()),
 });
 
 pub static OPEN_PROJECT_RULES: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {

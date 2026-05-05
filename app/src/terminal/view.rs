@@ -6061,7 +6061,7 @@ impl TerminalView {
                     if me.pwd().is_some() {
                         me.ai_controller.update(ctx, |controller, ctx| {
                             controller.send_slash_command_request(
-                                SlashCommandRequest::InitProjectRules,
+                                SlashCommandRequest::InitProjectRules { arguments: None },
                                 ctx,
                             );
                         });

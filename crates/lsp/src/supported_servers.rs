@@ -139,6 +139,17 @@ impl LSPServerType {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn managed_install_dir(&self) -> PathBuf {
+        warp_core::paths::data_dir().join(match self {
+            LSPServerType::RustAnalyzer => "rust-analyzer",
+            LSPServerType::GoPls => "gopls",
+            LSPServerType::Pyright => "pyright",
+            LSPServerType::TypeScriptLanguageServer => "typescript-language-server",
+            LSPServerType::Clangd => "clangd",
+        })
+    }
+
     /// Arguments for running via system PATH.
     #[cfg(not(target_arch = "wasm32"))]
     fn args(&self) -> Vec<&'static str> {

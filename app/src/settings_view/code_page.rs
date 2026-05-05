@@ -27,10 +27,11 @@ use crate::{
 };
 
 use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
-use ai::workspace::WorkspaceMetadata;
+
 use lsp::supported_servers::LSPServerType;
 use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
 use pathfinder_color::ColorU;
+use settings::Setting as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use warp_core::{
@@ -91,8 +92,8 @@ struct LspServerRowMouseStates {
     restart: MouseStateHandle,
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
     view_logs: MouseStateHandle,
-    toggle: SwitchStateHandle,
     install: MouseStateHandle,
+    uninstall: MouseStateHandle,
 }
 
 #[derive(Clone)]
@@ -120,9 +121,43 @@ pub struct CodeSettingsPageView {
 }
 
 impl CodeSettingsPageView {
+    fn set_global_lsp_server_enabled(
+        server_type: LSPServerType,
+        enabled: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+            let mut enabled_servers = settings.enabled_lsp_servers.value().clone();
+            if enabled {
+                if !enabled_servers.contains(&server_type) {
+                    enabled_servers.push(server_type);
+                }
+            } else {
+                enabled_servers.retain(|s| *s != server_type);
+            }
+            report_if_error!(settings.enabled_lsp_servers.set_value(enabled_servers, ctx));
+        });
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn spawn_global_lsp_for_known_workspaces(ctx: &mut ViewContext<Self>) {
+        let workspace_paths: Vec<PathBuf> = PersistedWorkspace::as_ref(ctx)
+            .workspaces()
+            .map(|workspace| workspace.path)
+            .collect();
+        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+            for file_path in workspace_paths {
+                workspace.execute_lsp_task(
+                    crate::ai::persisted_workspace::LspTask::Spawn { file_path },
+                    ctx,
+                );
+            }
+        });
+    }
+
     pub fn new(ctx: &mut ViewContext<CodeSettingsPageView>) -> Self {
-        // Calculate total LSP server count across all workspaces (enabled + disabled + suggested)
-        let lsp_server_count = PersistedWorkspace::as_ref(ctx).total_lsp_server_count(true);
+        // LSP enablement is global in openWarp: render one row per supported server type.
+        let lsp_server_count = LSPServerType::all().count();
 
         // Subscribe to LSP manager events for real-time status updates
         ctx.subscribe_to_model(
@@ -132,7 +167,7 @@ impl CodeSettingsPageView {
                 | LspManagerModelEvent::ServerStopped(_)
                 | LspManagerModelEvent::ServerRemoved { .. } => {
                     // Recalculate LSP server count and resize mouse states if needed
-                    let new_count = PersistedWorkspace::as_ref(ctx).total_lsp_server_count(true);
+                    let new_count = LSPServerType::all().count();
                     if me.lsp_row_mouse_states.len() != new_count {
                         me.lsp_row_mouse_states
                             .resize_with(new_count, Default::default);
@@ -169,7 +204,7 @@ impl CodeSettingsPageView {
                     me.suggested_server_statuses
                         .insert((workspace_path.clone(), server_type), status);
                 }
-                let new_count = PersistedWorkspace::as_ref(ctx).total_lsp_server_count(true);
+                let new_count = LSPServerType::all().count();
                 if me.lsp_row_mouse_states.len() != new_count {
                     me.lsp_row_mouse_states
                         .resize_with(new_count, Default::default);
@@ -397,11 +432,9 @@ pub enum CodeSettingsPageEvent {
 #[derive(Debug, Clone)]
 pub enum CodeSettingsPageAction {
     SignupAnonymousUser,
-    /// Toggle an LSP server on/off for a workspace.
-    ToggleLspServer {
-        workspace_path: PathBuf,
+    /// Uninstall a managed LSP server and disable it globally.
+    UninstallLspServer {
         server_type: LSPServerType,
-        currently_enabled: bool,
     },
     RestartLspServer {
         server: ModelHandle<LspServerModel>,
@@ -437,48 +470,51 @@ impl TypedActionView for CodeSettingsPageView {
             CodeSettingsPageAction::SignupAnonymousUser => {
                 ctx.emit(CodeSettingsPageEvent::SignupAnonymousUser);
             }
-            CodeSettingsPageAction::ToggleLspServer {
-                workspace_path,
-                server_type,
-                currently_enabled,
-            } => {
-                if *currently_enabled {
-                    // Toggling OFF: stop and disable
-                    send_telemetry_from_ctx!(
-                        LspTelemetryEvent::ServerRemoved {
-                            server_type: server_type.binary_name().to_string(),
-                            source: LspEnablementSource::Settings,
+            CodeSettingsPageAction::UninstallLspServer { server_type } => {
+                Self::set_global_lsp_server_enabled(*server_type, false, ctx);
+                send_telemetry_from_ctx!(
+                    LspTelemetryEvent::ServerRemoved {
+                        server_type: server_type.binary_name().to_string(),
+                        source: LspEnablementSource::Settings,
+                    },
+                    ctx
+                );
+                let roots: Vec<_> = LspManagerModel::as_ref(ctx)
+                    .workspace_roots()
+                    .cloned()
+                    .collect();
+                LspManagerModel::handle(ctx).update(ctx, |manager, ctx| {
+                    for root in roots {
+                        manager.remove_server(&root, *server_type, ctx);
+                    }
+                });
+
+                #[cfg(feature = "local_fs")]
+                {
+                    let server_type = *server_type;
+                    let install_dir = server_type.managed_install_dir();
+                    ctx.spawn(
+                        async move {
+                            if install_dir.exists() {
+                                std::fs::remove_dir_all(&install_dir)?;
+                            }
+                            Ok::<_, std::io::Error>(())
                         },
-                        ctx
-                    );
-                    LspManagerModel::handle(ctx).update(ctx, |manager, ctx| {
-                        manager.remove_server(workspace_path, *server_type, ctx);
-                    });
-                    PersistedWorkspace::handle(ctx).update(ctx, |workspace, _| {
-                        workspace.disable_lsp_server_for_path(workspace_path, *server_type);
-                    });
-                } else {
-                    // Toggling ON: enable and spawn
-                    send_telemetry_from_ctx!(
-                        LspTelemetryEvent::ServerEnabled {
-                            server_type: server_type.binary_name().to_string(),
-                            source: LspEnablementSource::Settings,
-                            needed_install: false,
+                        move |_me, result, ctx| {
+                            if let Err(err) = result {
+                                log::info!(
+                                    "Failed to remove managed LSP installation for {}: {err}",
+                                    server_type.binary_name()
+                                );
+                            }
+                            PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+                                workspace.mark_lsp_server_uninstalled(server_type, ctx);
+                            });
+                            ctx.notify();
                         },
-                        ctx
                     );
-                    let workspace_path = workspace_path.clone();
-                    PersistedWorkspace::handle(ctx).update(ctx, |workspace, _ctx| {
-                        workspace.enable_lsp_server_for_path(&workspace_path, *server_type);
-                        #[cfg(feature = "local_fs")]
-                        workspace.execute_lsp_task(
-                            crate::ai::persisted_workspace::LspTask::Spawn {
-                                file_path: workspace_path,
-                            },
-                            _ctx,
-                        );
-                    });
                 }
+
                 ctx.notify();
             }
             CodeSettingsPageAction::RestartLspServer { server } => {
@@ -502,6 +538,22 @@ impl TypedActionView for CodeSettingsPageView {
                     },
                     ctx
                 );
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    let log_directory = if log_path.extension().is_some() {
+                        log_path.parent()
+                    } else {
+                        Some(log_path.as_path())
+                    };
+                    if let Some(log_directory) = log_directory {
+                        if let Err(err) = std::fs::create_dir_all(log_directory) {
+                            log::info!(
+                                "Failed to create LSP log directory {}: {err}",
+                                log_directory.display()
+                            );
+                        }
+                    }
+                }
                 ctx.emit(CodeSettingsPageEvent::OpenLspLogs {
                     log_path: log_path.clone(),
                 });
@@ -560,6 +612,7 @@ impl TypedActionView for CodeSettingsPageView {
                 workspace_path,
                 server_type,
             } => {
+                Self::set_global_lsp_server_enabled(*server_type, true, ctx);
                 send_telemetry_from_ctx!(
                     LspTelemetryEvent::ServerEnabled {
                         server_type: server_type.binary_name().to_string(),
@@ -588,9 +641,10 @@ impl TypedActionView for CodeSettingsPageView {
                 ctx.notify();
             }
             CodeSettingsPageAction::EnableSuggestedLspServer {
-                workspace_path,
+                workspace_path: _,
                 server_type,
             } => {
+                Self::set_global_lsp_server_enabled(*server_type, true, ctx);
                 send_telemetry_from_ctx!(
                     LspTelemetryEvent::ServerEnabled {
                         server_type: server_type.binary_name().to_string(),
@@ -599,18 +653,10 @@ impl TypedActionView for CodeSettingsPageView {
                     },
                     ctx
                 );
-                let workspace_path = workspace_path.clone();
-                let server_type = *server_type;
-                PersistedWorkspace::handle(ctx).update(ctx, |workspace, _ctx| {
-                    workspace.enable_lsp_server_for_path(&workspace_path, server_type);
-                    #[cfg(feature = "local_fs")]
-                    workspace.execute_lsp_task(
-                        crate::ai::persisted_workspace::LspTask::Spawn {
-                            file_path: workspace_path,
-                        },
-                        _ctx,
-                    );
-                });
+                #[cfg(feature = "local_fs")]
+                Self::spawn_global_lsp_for_known_workspaces(ctx);
+                #[cfg(not(feature = "local_fs"))]
+                let _ = workspace_path;
                 ctx.notify();
             }
         }
@@ -687,7 +733,7 @@ impl CodePageWidget {
     fn render_initialized_folders(
         &self,
         mouse_states: InitializedFoldersMouseStates,
-        suggested_server_statuses: &HashMap<(PathBuf, LSPServerType), LspRepoStatus>,
+        _suggested_server_statuses: &HashMap<(PathBuf, LSPServerType), LspRepoStatus>,
         appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
@@ -696,7 +742,7 @@ impl CodePageWidget {
 
         let InitializedFoldersMouseStates {
             lsp_rows: lsp_row_mouse_states,
-            open_project_rules: open_project_rules_mouse_states,
+            open_project_rules: _open_project_rules_mouse_states,
         } = mouse_states;
 
         let mut content = Flex::column();
@@ -719,70 +765,21 @@ impl CodePageWidget {
             .finish(),
         );
 
-        // Get workspaces from PersistedWorkspace
-        let workspaces: Vec<WorkspaceMetadata> =
-            PersistedWorkspace::as_ref(app).workspaces().collect();
-
-        if workspaces.is_empty() {
-            content.add_child(
-                Container::new(
-                    appearance
-                        .ui_builder()
-                        .paragraph(crate::t!("settings-code-no-folders-initialized"))
-                        .build()
-                        .finish(),
-                )
-                .with_margin_bottom(MAIN_SECTION_MARGIN)
-                .finish(),
-            );
-            return content.finish();
-        }
-
         let lsp_manager = LspManagerModel::as_ref(app);
-        let persisted_workspace = PersistedWorkspace::as_ref(app);
 
-        let mut lsp_mouse_index = 0;
-
-        for (workspace_idx, workspace) in workspaces.iter().enumerate() {
-            let workspace_path = &workspace.path;
-
-            // Get all LSP servers (enabled + disabled + suggested) for this workspace
-            let all_servers: Vec<(LSPServerType, EnablementState)> = persisted_workspace
-                .all_lsp_servers(workspace_path, true)
-                .map(|iter| iter.collect())
-                .unwrap_or_default();
-
-            if all_servers.is_empty() {
-                continue;
-            }
-
-            // Get LSP server mouse states
-            let lsp_mouse_states: Vec<LspServerRowMouseStates> = all_servers
-                .iter()
-                .map(|_| {
-                    let state = lsp_row_mouse_states
-                        .get(lsp_mouse_index)
-                        .cloned()
-                        .unwrap_or_default();
-
-                    lsp_mouse_index += 1;
-
-                    state
+        for (idx, server_type) in LSPServerType::all().enumerate() {
+            let mouse_states = lsp_row_mouse_states.get(idx).cloned().unwrap_or_default();
+            let server_model = lsp_manager.workspace_roots().find_map(|root| {
+                lsp_manager.servers_for_workspace(root).and_then(|servers| {
+                    servers
+                        .iter()
+                        .find(|server| server.as_ref(app).server_type() == server_type)
                 })
-                .collect();
-
-            let open_rules_mouse = open_project_rules_mouse_states
-                .get(workspace_idx)
-                .cloned()
-                .unwrap_or_default();
-
-            content.add_child(self.render_workspace_row(
-                workspace_path,
-                &all_servers,
-                lsp_manager,
-                lsp_mouse_states,
-                open_rules_mouse,
-                suggested_server_statuses,
+            });
+            content.add_child(self.render_lsp_server_row(
+                server_type,
+                server_model,
+                mouse_states,
                 appearance,
                 app,
             ));
@@ -960,8 +957,6 @@ impl CodePageWidget {
                     appearance,
                 ));
             } else {
-                let is_enabled = *enablement_state == EnablementState::Yes;
-
                 // Find the corresponding server model (only exists if enabled and running)
                 let server_model = server_models.and_then(|servers| {
                     servers
@@ -970,10 +965,8 @@ impl CodePageWidget {
                 });
 
                 content.add_child(self.render_lsp_server_row(
-                    workspace_path,
                     *server_type,
                     server_model,
-                    is_enabled,
                     mouse_states,
                     appearance,
                     app,
@@ -1114,14 +1107,11 @@ impl CodePageWidget {
             .finish()
     }
 
-    /// Renders a single LSP server row with language initial icon, status, and toggle.
-    #[allow(clippy::too_many_arguments)]
+    /// Renders a single LSP server row with language initial icon, status, and actions.
     fn render_lsp_server_row(
         &self,
-        workspace_path: &Path,
         server_type: LSPServerType,
         server_model: Option<&warpui::ModelHandle<LspServerModel>>,
-        is_enabled: bool,
         mouse_states: LspServerRowMouseStates,
         appearance: &Appearance,
         app: &AppContext,
@@ -1216,7 +1206,7 @@ impl CodePageWidget {
         left_content.add_child(name_status_column.finish());
         row.add_child(left_content.finish());
 
-        // Right side: restart/logs buttons (if failed) + toggle switch (always)
+        // Right side: restart/logs/uninstall actions.
         let mut right_content = Flex::row()
             .with_spacing(8.)
             .with_cross_axis_alignment(CrossAxisAlignment::Center);
@@ -1248,54 +1238,60 @@ impl CodePageWidget {
             }
         }
 
-        // Show "View logs" when the server has been started (Available, Starting/Busy, or Failed)
         #[cfg(not(target_family = "wasm"))]
         {
-            let has_logs = server_model.is_some_and(|model| {
-                matches!(
-                    model.as_ref(app).state(),
-                    LspState::Available { .. } | LspState::Starting | LspState::Failed { .. }
-                )
-            });
-            if has_logs {
-                let log_path = crate::code::lsp_logs::log_file_path(server_type, workspace_path);
-                let view_logs_button = ui_builder
-                    .button(ButtonVariant::Accent, mouse_states.view_logs)
-                    .with_style(UiComponentStyles {
-                        font_size: Some(12.),
-                        ..Default::default()
-                    })
-                    .with_text_label(crate::t!("settings-code-lsp-view-logs"))
-                    .build()
-                    .with_cursor(Cursor::PointingHand)
-                    .on_click(move |ctx, _, _| {
-                        ctx.dispatch_typed_action(CodeSettingsPageAction::OpenLspLogs {
-                            log_path: log_path.clone(),
-                        });
-                    })
-                    .finish();
-
-                right_content.add_child(view_logs_button);
-            }
-        }
-
-        // Toggle switch (always shown)
-        let workspace_path_clone = workspace_path.to_path_buf();
-        let server_type_clone = server_type;
-        right_content.add_child(
-            ui_builder
-                .switch(mouse_states.toggle)
-                .check(is_enabled)
+            let log_path = server_model
+                .map(|model| {
+                    crate::code::lsp_logs::log_file_path(
+                        server_type,
+                        model.as_ref(app).initial_workspace(),
+                    )
+                })
+                .unwrap_or_else(|| crate::code::lsp_logs::log_directory_path(server_type));
+            let view_logs_button = ui_builder
+                .button(ButtonVariant::Secondary, mouse_states.view_logs)
+                .with_style(UiComponentStyles {
+                    font_size: Some(12.),
+                    ..Default::default()
+                })
+                .with_hovered_styles(UiComponentStyles {
+                    background: Some(theme.surface_3().into()),
+                    ..Default::default()
+                })
+                .with_text_label(crate::t!("settings-code-lsp-view-logs"))
                 .build()
+                .with_cursor(Cursor::PointingHand)
                 .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::ToggleLspServer {
-                        workspace_path: workspace_path_clone.clone(),
-                        server_type: server_type_clone,
-                        currently_enabled: is_enabled,
+                    ctx.dispatch_typed_action(CodeSettingsPageAction::OpenLspLogs {
+                        log_path: log_path.clone(),
                     });
                 })
-                .finish(),
-        );
+                .finish();
+
+            right_content.add_child(view_logs_button);
+        }
+
+        let uninstall_button = ui_builder
+            .button(ButtonVariant::Secondary, mouse_states.uninstall)
+            .with_style(UiComponentStyles {
+                font_size: Some(12.),
+                ..Default::default()
+            })
+            .with_hovered_styles(UiComponentStyles {
+                background: Some(theme.surface_3().into()),
+                ..Default::default()
+            })
+            .with_text_label(crate::i18n::t_or("settings-code-lsp-uninstall", "卸载"))
+            .build()
+            .with_cursor(Cursor::PointingHand)
+            .on_click(move |ctx, _, _| {
+                ctx.dispatch_typed_action(CodeSettingsPageAction::UninstallLspServer {
+                    server_type,
+                });
+            })
+            .finish();
+
+        right_content.add_child(uninstall_button);
 
         row.add_child(right_content.finish());
 

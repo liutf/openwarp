@@ -5,10 +5,11 @@ use enum_iterator::Sequence;
 use lsp::supported_servers::LSPServerType;
 #[cfg(not(target_family = "wasm"))]
 use repo_metadata::repositories::DetectedRepositories;
+use settings::Setting as _;
 use warpui::{Entity, ModelContext, SingletonEntity as _};
 
 use crate::{
-    ai::persisted_workspace::PersistedWorkspace,
+    settings::CodeSettings,
     terminal::view::init_project::{
         lsp_server_selector::LSPServerInfo, CodebaseIndexingResult, CreateEnvironmentResult,
         InitActionResult, LanguageServersResult, ProjectScopedRulesResult, FILES_TO_CHECK,
@@ -398,14 +399,10 @@ impl InitProjectModel {
                 }
 
                 // Check if already enabled and filter
-                let enabled_server_types: Vec<LSPServerType> = {
-                    let enabled_lsp_servers =
-                        PersistedWorkspace::as_ref(ctx).enabled_lsp_servers(&pwd_path);
-
-                    enabled_lsp_servers
-                        .map(|servers| servers.collect())
-                        .unwrap_or_default()
-                };
+                let enabled_server_types = CodeSettings::as_ref(ctx)
+                    .enabled_lsp_servers
+                    .value()
+                    .clone();
 
                 let filtered_servers: Vec<LSPServerInfo> = relevant_servers
                     .into_iter()

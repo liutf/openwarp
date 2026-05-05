@@ -63,6 +63,11 @@ fn build_env() -> Environment<'static> {
         include_str!("prompts/partials/plan_mode.j2"),
     )
     .expect("plan_mode partial parses");
+    env.add_template(
+        "commands/init_project.j2",
+        include_str!("prompts/commands/init_project.j2"),
+    )
+    .expect("init_project command template parses");
 
     // 按 model id 子串匹配分发 system prompt(对齐 opencode
     // `packages/opencode/src/session/system.ts::provider`)。OpenRouter 路径形如
@@ -190,6 +195,11 @@ struct ProjectRuleCtx {
 }
 
 #[derive(Debug, Default, Serialize)]
+struct InitProjectCommandContext {
+    arguments: String,
+}
+
+#[derive(Debug, Default, Serialize)]
 struct PromptContext {
     cwd: Option<String>,
     shell: Option<ShellCtx>,
@@ -294,6 +304,31 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
 // 公共 API
 // ---------------------------------------------------------------------------
 
+pub fn render_init_project_command(arguments: Option<&str>) -> String {
+    let arguments = arguments
+        .map(str::trim)
+        .filter(|arguments| !arguments.is_empty())
+        .unwrap_or("(none)")
+        .to_owned();
+    let ctx = InitProjectCommandContext { arguments };
+    let env = env();
+    let template_name = "commands/init_project.j2";
+    let tmpl = match env.get_template(template_name) {
+        Ok(t) => t,
+        Err(e) => {
+            log::error!("[byop prompt] failed to get template {template_name}: {e}");
+            return fallback_init_project_command(&ctx.arguments);
+        }
+    };
+    match tmpl.render(Value::from_serialize(&ctx)) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("[byop prompt] render {template_name} failed: {e}");
+            fallback_init_project_command(&ctx.arguments)
+        }
+    }
+}
+
 /// 渲染最终发给上游模型的 system message 字符串。
 ///
 /// `ctx` 一般来自 `params.input` 中最近一条 `AIAgentInput::UserQuery.context`。
@@ -332,6 +367,12 @@ pub fn render_system(
     }
 }
 
+fn fallback_init_project_command(arguments: &str) -> String {
+    format!(
+        "Create or update `AGENTS.md` for this repository.\n\nUser-provided focus or constraints (honor these):\n{arguments}"
+    )
+}
+
 /// 渲染兜底 system(只在模板加载/渲染失败时用,不应在正常路径触发)。
 fn fallback_system(model_id: &str) -> String {
     format!(
@@ -347,6 +388,14 @@ mod tests {
     use super::*;
     use crate::ai::agent::AIAgentContext;
     use crate::ai_assistant::execution_context::{WarpAiExecutionContext, WarpAiOsContext};
+
+    #[test]
+    fn render_init_project_command_uses_command_template_arguments() {
+        let out = render_init_project_command(Some("focus on test commands"));
+        assert!(out.contains("Create or update `AGENTS.md`"), "{out}");
+        assert!(out.contains("focus on test commands"), "{out}");
+        assert!(out.contains("## Writing rules"), "{out}");
+    }
 
     #[test]
     fn pick_template_dispatches_by_model_family() {

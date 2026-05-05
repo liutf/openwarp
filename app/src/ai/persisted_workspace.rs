@@ -13,12 +13,14 @@ use crate::persistence::ModelEvent;
 use crate::report_if_error;
 #[cfg(feature = "local_fs")]
 use crate::send_telemetry_from_ctx;
+use crate::settings::CodeSettings;
 use crate::terminal::TerminalView;
 use ai::workspace::WorkspaceMetadata;
 use anyhow::Context;
 use chrono::Utc;
 use itertools::Itertools;
 use lsp::supported_servers::LSPServerType;
+use settings::Setting as _;
 
 #[cfg(feature = "local_fs")]
 use warpui::windowing::WindowManager;
@@ -673,7 +675,7 @@ impl PersistedWorkspace {
             status: LSPInstallationStatus::Installing,
         });
 
-        let repo_root_clone = repo_root.clone();
+        let _ = repo_root;
         let file_path_clone = file_path.clone();
         let executor = lsp::CommandBuilder::new(path_env_var);
         let http_client = ServerApiProvider::as_ref(ctx).get_http_client();
@@ -686,8 +688,15 @@ impl PersistedWorkspace {
             },
             move |me, result, ctx| match result {
                 Ok(()) => {
-                    // Enable the LSP server
-                    me.enable_lsp_server_for_path(&repo_root_clone, server_type);
+                    CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                        let mut enabled_servers = settings.enabled_lsp_servers.value().clone();
+                        if !enabled_servers.contains(&server_type) {
+                            enabled_servers.push(server_type);
+                        }
+                        report_if_error!(settings
+                            .enabled_lsp_servers
+                            .set_value(enabled_servers, ctx));
+                    });
 
                     // Update installation status cache
                     me.lsp_installation_status
@@ -772,11 +781,12 @@ impl PersistedWorkspace {
             return;
         };
 
-        let Some(servers) = self.enabled_lsp_servers(workspace_root) else {
-            return;
-        };
-
-        let supported_servers = servers.collect::<Vec<LSPServerType>>();
+        let supported_servers = CodeSettings::as_ref(ctx)
+            .enabled_lsp_servers
+            .value()
+            .iter()
+            .copied()
+            .collect::<Vec<LSPServerType>>();
 
         if supported_servers.is_empty() {
             return;
@@ -883,10 +893,11 @@ impl PersistedWorkspace {
         // servers for this workspace before kicking off the expensive interactive
         // shell PATH capture.
         if let LspTask::Spawn { ref file_path } = task {
-            let has_servers = self
-                .root_for_workspace(file_path)
-                .and_then(|root| self.enabled_lsp_servers(root))
-                .is_some_and(|mut servers| servers.next().is_some());
+            let has_servers = self.root_for_workspace(file_path).is_some()
+                && !CodeSettings::as_ref(ctx)
+                    .enabled_lsp_servers
+                    .value()
+                    .is_empty();
             if !has_servers {
                 return;
             }
@@ -922,17 +933,30 @@ impl PersistedWorkspace {
     /// 4. If Installing => Installing
     /// 5. If Checking or Unknown => set Checking, start detection, return CheckingForInstallation
     #[cfg(feature = "local_fs")]
+    pub fn mark_lsp_server_uninstalled(
+        &mut self,
+        server_type: LSPServerType,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.lsp_installation_status
+            .insert(server_type, LSPInstallationStatus::NotInstalled);
+        ctx.emit(PersistedWorkspaceEvent::InstallStatusUpdate {
+            server_type,
+            status: LSPInstallationStatus::NotInstalled,
+        });
+    }
+
     pub fn detect_lsp_workspace_status(
         &mut self,
-        repo_root: PathBuf,
+        _repo_root: PathBuf,
         server_type: LSPServerType,
         ctx: &mut ModelContext<Self>,
     ) -> LspRepoStatus {
         // Determine enablement
-        let is_enabled = self
-            .enabled_lsp_servers(&repo_root)
-            .map(|mut it| it.any(|s| s == server_type))
-            .unwrap_or(false);
+        let is_enabled = CodeSettings::as_ref(ctx)
+            .enabled_lsp_servers
+            .value()
+            .contains(&server_type);
 
         // If enabled, do not check installation.
         if is_enabled {
