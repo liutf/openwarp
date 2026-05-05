@@ -21,6 +21,7 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
 
 # 创建 release + 上传 asset 需要写权限。默认 GITHUB_TOKEN 在 fork/受限仓库下是只读,
@@ -169,7 +170,7 @@ jobs:
           retention-days: 7
 
   release_linux:
-    name: Build Release (Linux x86_64 AppImage)
+    name: Build Release (Linux x86_64)
     runs-on: ubuntu-22.04
     needs: prepare_metadata
     # 用 22.04 (glibc 2.35) 而不是 ubuntu-latest (24.04, glibc 2.39),
@@ -187,6 +188,12 @@ jobs:
           is_self_hosted: false
           install_release_deps: true
 
+      - name: Install extra dependencies for deb and build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev fakeroot
+        shell: bash
+
       - name: Ensure rust target is installed
         run: rustup target add x86_64-unknown-linux-gnu
         shell: bash
@@ -201,7 +208,7 @@ jobs:
 
       - name: Build AppImage (unsigned)
         id: bundle_app
-        run: script/bundle --channel "$CHANNEL" --arch x86_64 --packages appimage
+        run: script/bundle --channel "$CHANNEL" --arch x86_64 --packages appimage,deb
         shell: bash
         env:
           GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
@@ -209,17 +216,18 @@ jobs:
           # 让 linuxdeploy/appimagetool 不依赖 FUSE 内核模块,跨 runner 版本都稳。
           APPIMAGE_EXTRACT_AND_RUN: 1
 
-      - name: Upload AppImage artifact
+      - name: Upload package artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: openwarp-linux-x86_64
-          path: ${{ steps.bundle_app.outputs.appimage_path }}
+          path: ${{ steps.bundle_app.outputs.packages_dir }}
           if-no-files-found: error
           retention-days: 7
 
   publish_release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
     # 必须等所有平台都 build 成功才发布;任一失败 → 此 job 跳过 → 不会出现空 Release。
     needs:
       - prepare_metadata
