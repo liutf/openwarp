@@ -110,7 +110,6 @@ pub enum AIAgentActionType {
 
     SuggestPrompt(SuggestPromptRequest),
 
-    InitProject,
     OpenCodeReview,
 
     ReadDocuments(ReadDocumentsRequest),
@@ -202,7 +201,6 @@ impl AIAgentActionType {
                 AIAgentActionResultType::SuggestPrompt(SuggestPromptResult::Cancelled)
             }
             Self::OpenCodeReview => AIAgentActionResultType::OpenCodeReview,
-            Self::InitProject => AIAgentActionResultType::InitProject,
             Self::ReadDocuments(_) => {
                 AIAgentActionResultType::ReadDocuments(ReadDocumentsResult::Cancelled)
             }
@@ -230,6 +228,35 @@ impl AIAgentActionType {
         }
     }
 
+    /// 进行时短语,用于 surface "AI 当前在做什么"——
+    /// 子代理状态卡 / status bar / 父卡 surfacing 等场景。
+    /// 短而具体,前端可加 `↳ Reading files...` / `↳ Searching codebase...`。
+    /// 风格对齐 opencode TUI(Bash="Writing command..." / Read="Reading file..." 等)。
+    pub fn presence_continuous_summary(&self) -> &'static str {
+        match self {
+            Self::RequestCommandOutput { .. } => "Running command",
+            Self::WriteToLongRunningShellCommand { .. } => "Writing to shell",
+            Self::ReadFiles(_) => "Reading files",
+            Self::SearchCodebase(_) => "Searching codebase",
+            Self::RequestFileEdits { .. } => "Editing files",
+            Self::Grep { .. } => "Searching content",
+            Self::FileGlob { .. } | Self::FileGlobV2 { .. } => "Finding files",
+            Self::ReadMCPResource { .. } => "Reading MCP resource",
+            Self::CallMCPTool { .. } => "Calling MCP tool",
+            Self::SuggestNewConversation { .. } => "Suggesting new conversation",
+            Self::SuggestPrompt { .. } => "Suggesting prompts",
+            Self::OpenCodeReview => "Opening code review",
+            Self::ReadDocuments(_) => "Reading documents",
+            Self::EditDocuments(_) => "Editing documents",
+            Self::CreateDocuments(_) => "Creating documents",
+            Self::ReadShellCommandOutput { .. } => "Reading shell output",
+            Self::InsertCodeReviewComments { .. } => "Inserting review comments",
+            Self::ReadSkill(_) => "Reading skill",
+            Self::TransferShellCommandControlToUser { .. } => "Transferring control",
+            Self::AskUserQuestion { .. } => "Asking question",
+        }
+    }
+
     pub fn user_friendly_name(&self) -> String {
         match self {
             Self::RequestCommandOutput { command, .. } => {
@@ -250,7 +277,6 @@ impl AIAgentActionType {
             Self::CallMCPTool { .. } => "Call mcp tool".to_string(),
             Self::SuggestNewConversation { .. } => "Suggest new conversation".to_string(),
             Self::SuggestPrompt { .. } => "Suggest prompt".to_string(),
-            Self::InitProject => "Init project".to_string(),
             Self::OpenCodeReview => "Open code review".to_string(),
             Self::ReadDocuments(_) => "Read documents".to_string(),
             Self::EditDocuments(_) => "Edit documents".to_string(),
@@ -349,9 +375,6 @@ impl Display for AIAgentActionType {
             }
             AIAgentActionType::SuggestPrompt(request) => {
                 write!(f, "SuggestPrompt: {request:?}")
-            }
-            AIAgentActionType::InitProject => {
-                write!(f, "InitProject")
             }
             AIAgentActionType::OpenCodeReview => {
                 write!(f, "OpenCodeReview")

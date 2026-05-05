@@ -53,10 +53,10 @@ use genai::chat::{
     MessageContent, Tool as GenaiTool, ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client, ModelIden, ServiceTarget};
+use genai::{Client, ModelIden, ServiceTarget, WebConfig};
 
 use crate::ai::agent::api::{RequestParams, ResponseStream};
-use crate::ai::agent::{AIAgentInput, RunningCommand};
+use crate::ai::agent::{AIAgentInput, RunningCommand, UserQueryMode};
 use crate::ai::byop_compaction;
 use crate::server::server_api::AIApiError;
 use crate::settings::AgentProviderApiType;
@@ -222,11 +222,31 @@ fn xml_attr(s: &str) -> String {
 /// 累积同一 assistant turn 的 text + tool_calls + reasoning,然后 flush 成一个或两个
 /// `ChatMessage`(text 一个,tool_calls 一个 — genai 把它们建模为分开的 message)。
 ///
-/// **thinking-mode reasoning_content 回传**:对 DeepSeek / Kimi 这类要求"每条
-/// assistant 都必须回传 reasoning_content 字段"的 adapter,buf 持有 `force_echo=true`,
-/// flush 时即使本 turn 没攒到 reasoning 也会挂一个非空占位 — genai 序列化层
-/// (`adapter_shared.rs:368-373`) 只看 `ContentPart::ReasoningContent` 是否存在。
-/// 其他 adapter(Anthropic / Gemini)`force_echo=false`,行为退化为旧逻辑(reasoning 非空才挂)。
+/// **thinking-mode reasoning_content 回传 gate**(双向)。
+///
+/// `force_echo_reasoning` 同时控制两件事,语义统一为「这个 endpoint 接受/需要
+/// `reasoning_content` 顶层字段」:
+///
+/// - `true`(DeepSeek api_type / OpenAI+kimi|moonshot):每条 assistant 必挂
+///   `reasoning_content`(有真实 reasoning 用之,无则挂非空占位)— 满足
+///   DeepSeek-v4-flash / Kimi 等 thinking-mode 服务端「字段必须存在」校验。
+/// - `false`(其他):**即便 stream 收到了真实 reasoning_content,回放时也丢弃**,
+///   不在历史 assistant 上挂 `with_reasoning_content`。
+///
+/// 为什么 `false` 时也要主动丢弃真实 reasoning:许多 OpenAI-strict provider 把
+/// `messages[].reasoning_content` 视为非法字段并 400(`code: wrong_api_format`):
+///
+/// - **Cerebras**(zerx-lab/warp #25 元凶,zai-glm-4.7 第二轮 400)
+/// - **Groq**(协议侧用 `reasoning_format` / `include_reasoning`,不接受 message 字段)
+/// - **OpenRouter / Together AI / SambaNova / Anyscale / Replicate** 等中转/inference 厂商
+/// - **OpenAI 官方**(GPT-5/o-series 走 OpenAIResp,o-series 用 `reasoning.encrypted_content`,不收 `reasoning_content`)
+///
+/// genai 0.6 OpenAI adapter `adapter_shared.rs:367,385-387` 见到
+/// `ContentPart::ReasoningContent` 就**无条件** hoist 出顶层 `reasoning_content`
+/// 字段,所以 gate 必须前移到 client 侧 — 即「不挂 ContentPart 就不会被序列化」。
+///
+/// Anthropic / Gemini adapter 序列化层会忽略 `ContentPart::ReasoningContent`
+/// (各自走 thinking blocks / thought signature),不受这个 gate 影响,但保持一致仍走 `false` 分支不挂。
 const REASONING_ECHO_PLACEHOLDER: &str = " ";
 
 #[derive(Default)]
@@ -253,14 +273,25 @@ impl AssistantBuffer {
     fn flush_into(&mut self, messages: &mut Vec<ChatMessage>) {
         let reasoning = self.reasoning.take();
         let has_tool_calls = !self.tool_calls.is_empty();
-        // 决定本次 flush 要挂到 tool_calls assistant 上的 reasoning 字符串:
-        // - 有真实 reasoning 文本 → 用之
-        // - 没有 + force_echo → 非空占位(满足 DeepSeek/Kimi 服务端"字段必须存在"的校验)
-        // - 没有 + 不 force_echo → None(不挂字段,跟旧行为一致)
-        let echo_reasoning: Option<String> = match reasoning {
-            Some(r) if !r.is_empty() => Some(r),
-            _ if self.force_echo_reasoning => Some(REASONING_ECHO_PLACEHOLDER.to_owned()),
-            _ => None,
+        // 决定本次 flush 要挂到 assistant message 上的 reasoning 字符串。
+        //
+        // **gate 反转**:`force_echo_reasoning = false` 时**一律不挂**,即使本 turn
+        // stream 收到了真实 reasoning(zai-glm / qwen3-thinking 这类 thinking 模型走
+        // OpenAI 兼容路径会 emit reasoning_content chunk)— 因为 Cerebras / Groq /
+        // OpenRouter 等 OpenAI-strict provider 见到 `messages[].reasoning_content` 直接
+        // 400 `wrong_api_format`(zerx-lab/warp #25)。
+        //
+        // `force_echo_reasoning = true` 时(DeepSeek api_type / OpenAI+kimi/moonshot):
+        // - 有真实 reasoning → 用之
+        // - 没有 → 非空占位(满足"字段必须存在"校验)
+        let echo_reasoning: Option<String> = if self.force_echo_reasoning {
+            match reasoning {
+                Some(r) if !r.is_empty() => Some(r),
+                _ => Some(REASONING_ECHO_PLACEHOLDER.to_owned()),
+            }
+        } else {
+            // 注:即便 `reasoning` 是 Some(非空),也丢弃 — 见上方 gate 反转说明。
+            None
         };
         if let Some(t) = self.text.take() {
             let mut msg = ChatMessage::assistant(t);
@@ -391,7 +422,10 @@ fn build_chat_request(
     model_id: &str,
 ) -> ChatRequest {
     let agent_ctx = latest_input_context(&params.input);
-    let mut system_text = prompt_renderer::render_system(&params.model, agent_ctx);
+    let plan_mode = is_plan_mode_turn(&params.input);
+    let tool_names = available_tool_names(params);
+    let mut system_text =
+        prompt_renderer::render_system(&params.model, agent_ctx, &tool_names, plan_mode);
     // OpenWarp:legacy SSH 会话画像补丁。`render_system` 走 AIAgentContext,
     // 拿到的 OS/shell 是本地客户端;legacy SSH 下 PTY 实际在远端,
     // 追加一段 SSH 状态块矫正 LLM 推断。
@@ -518,23 +552,21 @@ fn build_chat_request(
                 continue;
             }
         }
+        if hidden_msg_ids.contains(&msg.id) {
+            if let Some(summary_text) = summary_inserts.get(&msg.id) {
+                buf.flush_into(&mut messages);
+                messages.push(ChatMessage::user(
+                    "Conversation history was compacted. Below is the structured summary of all prior turns.".to_string(),
+                ));
+                messages.push(ChatMessage::assistant(summary_text.clone()));
+            }
+            continue;
+        }
         let Some(inner) = &msg.message else {
             continue;
         };
         match inner {
             api::message::Message::UserQuery(u) => {
-                // 压缩投影:hidden 区间的 user message 替换为合成的"以下为已压缩历史的摘要"对
-                if hidden_msg_ids.contains(&msg.id) {
-                    if let Some(summary_text) = summary_inserts.get(&msg.id) {
-                        buf.flush_into(&mut messages);
-                        messages.push(ChatMessage::user(
-                            "Conversation history was compacted. Below is the structured summary of all prior turns.".to_string(),
-                        ));
-                        messages.push(ChatMessage::assistant(summary_text.clone()));
-                    }
-                    // 没有 summary_text 的 hidden user 直接 skip(不应该发生,防御性)
-                    continue;
-                }
                 buf.flush_into(&mut messages);
                 // OpenWarp:历史轮多模态保活。warp 自家路径靠云端 server 重注入 InputContext,
                 // BYOP 直连没有那层,所以 `make_user_query_message` 持久化时把所有 binary
@@ -576,13 +608,6 @@ fn build_chat_request(
                         model_id,
                     ));
                 }
-            }
-            // hidden assistant message 直接 skip(它是某次压缩对的 assistant_msg_id,
-            // 摘要文本已经在对应 user 分支注入)
-            api::message::Message::AgentReasoning(_) | api::message::Message::AgentOutput(_)
-                if hidden_msg_ids.contains(&msg.id) =>
-            {
-                continue;
             }
             api::message::Message::AgentReasoning(r) => {
                 // 把上一轮的 reasoning 挂到下一个要 flush 的 assistant message 上。
@@ -1266,7 +1291,6 @@ fn serialize_outgoing_tool_call(
             )
         }
         Some(Tool::OpenCodeReview(_)) => ("open_code_review".to_owned(), "{}".to_owned()),
-        Some(Tool::InitProject(_)) => ("init_project".to_owned(), "{}".to_owned()),
         Some(Tool::TransferShellCommandControlToUser(t)) => (
             "transfer_shell_command_control_to_user".to_owned(),
             json!({ "reason": t.reason }).to_string(),
@@ -1314,6 +1338,86 @@ fn serialize_outgoing_tool_call(
 // Tools 数组
 // ---------------------------------------------------------------------------
 
+/// 本轮 input 是否含 `/plan` 触发的 `UserQueryMode::Plan`。
+///
+/// per-turn 语义:只看本轮 `params.input` 是否带 Plan 标记。历史 task message
+/// 当前的持久化路径(`make_user_query_message`)用 `..Default::default()` 写入
+/// 上游 proto,**不带 mode 字段**;所以 plan 状态不会自动跨轮 sticky,用户每条
+/// 想保持只读的 query 都需重新加 `/plan ` 前缀。这是有意为之的 MVP 形态:
+/// - 实施成本最低(无需改 proto schema、无需新会话级状态机)
+/// - 与 Claude Code `EnterPlanMode` 的"显式进入/退出"语义一致 —— 只是这里把
+///   退出动作隐含在"下一条不带 /plan"
+fn is_plan_mode_turn(input: &[AIAgentInput]) -> bool {
+    input.iter().any(|i| {
+        matches!(
+            i,
+            AIAgentInput::UserQuery {
+                user_query_mode: UserQueryMode::Plan,
+                ..
+            }
+        )
+    })
+}
+
+/// Plan Mode 下硬过滤的写/执行类内置工具名。
+///
+/// 逻辑兜底,即使模型无视 `partials/plan_mode.j2` 的引导也无法触发副作用 ——
+/// 工具不在 tool list 里就调用不到(provider 协议层会直接拒绝 unknown function)。
+///
+/// **没被 BLOCK 的写类工具**:`create_documents` / `edit_documents`。它们只动
+/// Warp Drive 本地文档存储(AIDocumentModel),不碰文件系统、不跑命令,语义上
+/// 恰好是 Plan Mode 的产出归档动作 —— 模型把最终 plan 沉淀为 Drive 文档,
+/// 用户后续可在 Drive UI 中查看 / 编辑 / 拖入自建的 PLAN 文件夹复用。
+///
+/// 留下的只读 + Drive 写子集:`read_files / grep / file_glob_v2 /
+/// read_shell_command_output / ask_user_question / read_skill / read_documents /
+/// create_documents / edit_documents / webfetch / websearch / mcp/*`。
+const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
+    "run_shell_command",
+    "apply_file_diffs",
+    "write_to_long_running_shell_command",
+    "open_code_review",
+    "transfer_shell_command_control_to_user",
+    "suggest_prompt",
+];
+
+/// 列出本轮真正会喂给上游模型的 tool name(内置 REGISTRY + 当前 MCP 工具),
+/// 与 `build_tools_array` 共享同一套 gating(LRC / `web_search_enabled` /
+/// `suggest_new_conversation` / `plan_mode`)。供 `prompt_renderer` 注入到
+/// system prompt,让模板按实际可用列表动态渲染,不再硬编码白/黑名单。
+pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
+    let is_lrc = params.lrc_command_id.is_some();
+    let web_enabled = params.web_search_enabled;
+    let plan_mode = is_plan_mode_turn(&params.input);
+    let mut names: Vec<String> = tools::REGISTRY
+        .iter()
+        .filter(|t| {
+            if is_lrc && t.name == "run_shell_command" {
+                return false;
+            }
+            if !web_enabled
+                && (t.name == tools::webfetch::TOOL_NAME || t.name == tools::websearch::TOOL_NAME)
+            {
+                return false;
+            }
+            if t.name == "suggest_new_conversation" {
+                return false;
+            }
+            if plan_mode && PLAN_MODE_BLOCKED_TOOLS.contains(&t.name) {
+                return false;
+            }
+            true
+        })
+        .map(|t| t.name.to_owned())
+        .collect();
+    if let Some(ctx) = params.mcp_context.as_ref() {
+        for (name, _description, _parameters) in tools::mcp::build_mcp_tool_defs(ctx) {
+            names.push(name);
+        }
+    }
+    names
+}
+
 fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // OpenWarp A2:LRC tag-in 场景剔除 `run_shell_command`,迫使模型选 PTY 操作类工具。
     //
@@ -1331,6 +1435,7 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // 信息收集和反问。
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
+    let plan_mode = is_plan_mode_turn(&params.input);
     // OpenWarp BYOP:`suggest_prompt` chip UI 已通过 view 层订阅
     // PromptSuggestionExecutorEvent 恢复(见 `terminal/view.rs::
     // handle_suggest_prompt_executor_event`),可以暴露给模型。
@@ -1360,6 +1465,13 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
             if t.name == "suggest_new_conversation" {
                 return false;
             }
+            // Plan Mode:`/plan` 触发的只读模式硬护栏,移除写/执行类工具。
+            // 与 system prompt 的 plan_mode.j2 引导双重保险 —— 即便模型无视
+            // 提示词,工具不在列表里也无法触发副作用(provider 协议层
+            // 会直接拒绝 unknown function)。
+            if plan_mode && PLAN_MODE_BLOCKED_TOOLS.contains(&t.name) {
+                return false;
+            }
             true
         })
         .map(|t| {
@@ -1387,6 +1499,14 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
         log::info!(
             "[byop] LRC tag-in: tools array filtered (removed run_shell_command), \
              total tools={}",
+            out.len()
+        );
+    }
+    if plan_mode {
+        log::info!(
+            "[byop] Plan Mode: tools array filtered (removed write/exec tools: {:?}), \
+             total tools={}",
+            PLAN_MODE_BLOCKED_TOOLS,
             out.len()
         );
     }
@@ -1481,15 +1601,73 @@ pub(super) fn build_client(
             })
         },
     );
+
+    // OpenWarp BYOP:SSE 流必须不带 gzip。`Accept-Encoding: gzip` 会让 nginx
+    // 类代理把响应压缩,server 必须 flush 完整 deflate frame 客户端才能解出
+    // 明文,流式语义被破坏成 ~K 字节 burst,体感"几百毫秒一卡"。zed/opencode
+    // 用 native fetch / std HTTP 不主动协商 gzip on SSE,所以同代理无问题。
+    //
+    // 这里显式构造 `WebConfig` 即使 genai default 已经 `gzip=false`(fork 修改)。
+    let web_config = WebConfig {
+        gzip: false,
+        ..WebConfig::default()
+    };
     Client::builder()
+        .with_web_config(web_config)
         .with_service_target_resolver(resolver)
         .build()
 }
 
-fn build_chat_options(
+/// 判定是否给 DashScope(阿里云百炼,OpenAI 兼容路径)注入 `enable_thinking: true`。
+///
+/// 对齐 opencode `transform.ts:931-938`(provider/transform.ts L926+ 的注释):
+/// 「DashScope 默认不开 thinking,qwen3 / qwq / deepseek-r1 / kimi-k2.5 / qwen-plus
+/// 等 reasoning 模型必须显式 `enable_thinking: true` 才会输出 reasoning_content」。
+///
+/// 命中条件(全部满足):
+/// 1. `api_type == OpenAi`(DashScope 走 OpenAI 兼容路径)
+/// 2. `effort_setting != Off`(用户主动关思考时尊重之,不注入)
+/// 3. base_url 含 `dashscope.aliyuncs.com` / `dashscope.cn` / `dashscope-intl.aliyuncs.com`
+/// 4. model_id 不含 `kimi-k2-thinking`(opencode 排除,该模型默认就 thinking)
+/// 5. model_id 命中 reasoning 子串白名单:`qwen3` / `qwq` / `deepseek-r1` / `kimi-k2.5` /
+///    `kimi-k2-` / `qwen-plus`(避免给 qwen-turbo / qwen2.5 等纯 chat 模型乱塞)
+fn dashscope_needs_enable_thinking(
     api_type: AgentProviderApiType,
+    base_url: &str,
     model_id: &str,
     effort_setting: crate::settings::ReasoningEffortSetting,
+) -> bool {
+    if !matches!(api_type, AgentProviderApiType::OpenAi) {
+        return false;
+    }
+    if matches!(effort_setting, crate::settings::ReasoningEffortSetting::Off) {
+        return false;
+    }
+    let url = base_url.to_ascii_lowercase();
+    let is_dashscope = url.contains("dashscope.aliyuncs.com")
+        || url.contains("dashscope.cn")
+        || url.contains("dashscope-intl.aliyuncs.com");
+    if !is_dashscope {
+        return false;
+    }
+    let id = model_id.to_ascii_lowercase();
+    if id.contains("kimi-k2-thinking") {
+        return false;
+    }
+    id.contains("qwen3")
+        || id.contains("qwq")
+        || id.contains("deepseek-r1")
+        || id.contains("kimi-k2.5")
+        || id.contains("kimi-k2-")
+        || id.contains("qwen-plus")
+}
+
+fn build_chat_options(
+    api_type: AgentProviderApiType,
+    base_url: &str,
+    model_id: &str,
+    effort_setting: crate::settings::ReasoningEffortSetting,
+    extra_headers: Vec<(String, String)>,
 ) -> ChatOptions {
     let mut opts = ChatOptions::default()
         .with_capture_content(true)
@@ -1529,6 +1707,22 @@ fn build_chat_options(
             );
         }
     }
+
+    // DashScope(阿里云百炼)OpenAI 兼容路径需显式 `enable_thinking: true` 才会
+    // 输出 reasoning。详见 `dashscope_needs_enable_thinking` 注释。
+    // 与上面 DeepSeek Off 的 extra_body 互斥(DeepSeek 走 DeepSeek api_type,
+    // DashScope 走 OpenAI api_type),不会同时 fire。
+    if dashscope_needs_enable_thinking(api_type, base_url, model_id, effort_setting) {
+        log::info!(
+            "[byop] DashScope reasoning model → extra_body enable_thinking=true \
+             (model={model_id} setting={effort_setting:?})"
+        );
+        opts = opts.with_extra_body(json!({"enable_thinking": true}));
+    }
+    if !extra_headers.is_empty() {
+        opts = opts.with_extra_headers(extra_headers);
+    }
+
     opts
 }
 
@@ -1590,6 +1784,7 @@ pub async fn generate_byop_output(
     model_id: String,
     api_type: AgentProviderApiType,
     reasoning_effort: crate::settings::ReasoningEffortSetting,
+    extra_headers: Vec<(String, String)>,
     task_id: String,
     target_task_id: String,
     needs_create_task: bool,
@@ -1607,7 +1802,13 @@ pub async fn generate_byop_output(
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
     let force_echo_reasoning = super::reasoning::model_requires_reasoning_echo(api_type, &model_id);
     let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, &model_id);
-    let chat_opts = build_chat_options(api_type, &model_id, reasoning_effort);
+    let chat_opts = build_chat_options(
+        api_type,
+        &base_url,
+        &model_id,
+        reasoning_effort,
+        extra_headers,
+    );
     let client = build_client(api_type, base_url, api_key);
     let conversation_id = params
         .conversation_token
@@ -1922,6 +2123,19 @@ pub async fn generate_byop_output(
         // (since 0.4.0 行为),但跨 chunk 同一 call_id 可能多次出现 args 增量,
         // 用 HashMap 按 id 累积后在流末统一 emit。
         let mut tool_bufs: HashMap<String, ToolCall> = HashMap::new();
+        // call_id → 首帧占位 ToolCall message 的 id。
+        // 首次 ToolCallChunk 到达且可解析时立即 emit 一条占位卡(让 UI 在 stream End
+        // 之前就能看到"调用 X 工具"反馈),流末用 update_message 原地刷新为最终 args。
+        // 不在表里的 call_id(首帧 parse 失败 / web 工具)走老路径在 End 后一次性 emit。
+        let mut tool_msg_ids: HashMap<String, String> = HashMap::new();
+        // call_id → 上次 update_message 增量刷新的时刻。
+        // 长 args 工具(create_or_edit_document、长 grep query)args 跨多 chunk 累积时,
+        // 节流 ≥ 200ms reparse + update,体感跟文本流一样连续而不是首帧定格到 End。
+        let mut tool_last_update: HashMap<String, std::time::Instant> = HashMap::new();
+        // 增量刷新节流阈值:小于此值的连续 chunk 不再 update_message,避免频繁 UI 重排。
+        // 注:SDK stream 每个 ChatStreamEvent 独立 await,多 tool 并发时本就是顺序到达,
+        // 同 tick batch emit 在此层意义不大;真正降抖在节流上,这条注释提醒后续不要瞎引入 batch。
+        const TOOL_ARGS_UPDATE_THROTTLE_MS: u64 = 200;
         // 诊断:统计 stream 各类事件计数,流末打 INFO log。
         // 用于排查"消息静默消失"——如果 chunk_count=0 且 tool_count=0,说明上游返回空内容。
         let mut start_count: u32 = 0;
@@ -2014,6 +2228,73 @@ pub async fn generate_byop_output(
                     if call.call_id.is_empty() {
                         call.call_id = Uuid::new_v4().to_string();
                     }
+                    // 首次见到该 call_id → 立即 push 占位 ToolCall 消息到 pending_placeholders,
+                    // 让 UI 在 stream End 之前就出现"调用 X 工具"卡片。
+                    // 多 tool 同 tick 内来时:本循环结束前统一 batch emit 一次 add_messages,
+                    // 减少 view tree 重排次数。
+                    // 已在表里(占位已发)且 args 又来新 chunk → 节流 ≥ 200ms reparse + update_message
+                    // 增量刷新 args,长 args 工具(create_or_edit_document、长 grep 等)体感连续。
+                    // web 工具(webfetch/websearch)走自己的 loading 帧链路(L2102 区域),
+                    // 这里跳过避免双卡。
+                    if call.fn_name != tools::webfetch::TOOL_NAME
+                        && call.fn_name != tools::websearch::TOOL_NAME
+                    {
+                        if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
+                            // 已 emit 占位 → 节流增量刷新。
+                            let now = std::time::Instant::now();
+                            let last = tool_last_update.get(&call.call_id).copied();
+                            let elapsed_ok = last
+                                .map(|t| now.duration_since(t).as_millis() as u64 >= TOOL_ARGS_UPDATE_THROTTLE_MS)
+                                .unwrap_or(true);
+                            if elapsed_ok {
+                                if let Ok(parsed) =
+                                    parse_incoming_tool_call(&call, mcp_context.as_ref())
+                                {
+                                    let mut updated = make_tool_call_message(
+                                        &current_task_id,
+                                        &request_id,
+                                        &call.call_id,
+                                        parsed,
+                                    );
+                                    updated.id = msg_id;
+                                    tool_last_update.insert(call.call_id.clone(), now);
+                                    yield Ok(make_update_message_event(
+                                        &current_task_id,
+                                        updated,
+                                        vec!["tool_call".to_owned()],
+                                    ));
+                                }
+                                // reparse 失败(intermediate 状态):静默,等下次 chunk。
+                            }
+                        } else if let Ok(parsed) =
+                            parse_incoming_tool_call(&call, mcp_context.as_ref())
+                        {
+                            // 首次 parse 成功 → 立即 emit 占位卡。
+                            // 每个 chunk 在未 emit 占位前都会重 parse(即"retry on every
+                            // chunk"),所以即便首帧 args 不全,后续任意 chunk 完整时
+                            // 都会立刻触发占位 emit—— 这就是 P1-4 的覆盖路径,
+                            // 不再需要 generic placeholder variant。
+                            let msg_id = Uuid::new_v4().to_string();
+                            let mut placeholder = make_tool_call_message(
+                                &current_task_id,
+                                &request_id,
+                                &call.call_id,
+                                parsed,
+                            );
+                            placeholder.id = msg_id.clone();
+                            tool_msg_ids.insert(call.call_id.clone(), msg_id);
+                            tool_last_update.insert(
+                                call.call_id.clone(),
+                                std::time::Instant::now(),
+                            );
+                            yield Ok(make_add_messages_event(
+                                &current_task_id,
+                                vec![placeholder],
+                            ));
+                        }
+                        // 首帧 parse 失败(args 还不完整 / 未知工具):暂不 emit,
+                        // 等下次 chunk 再尝试或 End 时走老路径,避免视觉抖动。
+                    }
                     // 同一 call_id 多次 chunk:后到的覆盖(genai 已合并 args)。
                     tool_bufs.insert(call.call_id.clone(), call);
                 }
@@ -2067,28 +2348,37 @@ pub async fn generate_byop_output(
             // (call_id / fn_name / fn_arguments JSON 原文 + 类型标注),
             // 便于核对模型是否按 schema 出入参(常见问题:bool 字段被字符串化、
             // 数字被加引号、嵌套对象塌成字符串等)。
-            let args_repr = if call.fn_arguments.is_string() {
-                format!("string({:?})", call.fn_arguments.as_str().unwrap_or(""))
-            } else {
-                format!(
-                    "{}({})",
-                    match &call.fn_arguments {
-                        Value::Object(_) => "object",
-                        Value::Array(_) => "array",
-                        Value::Bool(_) => "bool",
-                        Value::Number(_) => "number",
-                        Value::Null => "null",
-                        Value::String(_) => "string",
-                    },
-                    call.fn_arguments
-                )
-            };
+            // debug 级:只在排查 schema 问题时开 RUST_LOG=debug,平时不污染 INFO。
+            // info 级保留一行不带 args 的简短摘要,便于看流式时序。
             log::info!(
-                "[byop] tool_call_in: name={} call_id={} args={}",
+                "[byop] tool_call_in: name={} call_id={}",
                 call.fn_name,
                 call.call_id,
-                args_repr,
             );
+            if log::log_enabled!(log::Level::Debug) {
+                let args_repr = if call.fn_arguments.is_string() {
+                    format!("string({:?})", call.fn_arguments.as_str().unwrap_or(""))
+                } else {
+                    format!(
+                        "{}({})",
+                        match &call.fn_arguments {
+                            Value::Object(_) => "object",
+                            Value::Array(_) => "array",
+                            Value::Bool(_) => "bool",
+                            Value::Number(_) => "number",
+                            Value::Null => "null",
+                            Value::String(_) => "string",
+                        },
+                        call.fn_arguments
+                    )
+                };
+                log::debug!(
+                    "[byop] tool_call_in_args: name={} call_id={} args={}",
+                    call.fn_name,
+                    call.call_id,
+                    args_repr,
+                );
+            }
 
             // OpenWarp BYOP web 工具拦截:webfetch / websearch 不映射到 protobuf
             // executor variant,在这里直接跑本地 HTTP,合成 (carrier ToolCall,
@@ -2197,12 +2487,32 @@ pub async fn generate_byop_output(
 
             match parse_incoming_tool_call(&call, mcp_context.as_ref()) {
                 Ok(warp_tool) => {
-                    final_messages.push(make_tool_call_message(
-                        &current_task_id,
-                        &request_id,
-                        &call.call_id,
-                        warp_tool,
-                    ));
+                    // 如果 ToolCallChunk 阶段已经 emit 过占位卡(同 call_id),
+                    // 改用 update_message 原地刷新为最终 args(覆盖 chunk 中可能后到
+                    // 的 args delta)。占位与终帧共用同一 message.id,
+                    // task::upsert_message 走 FieldMaskOperation::update,
+                    // task.messages 仍只有一条 → UI 一张卡 in-place 刷新,不双卡。
+                    if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
+                        let mut updated = make_tool_call_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            warp_tool,
+                        );
+                        updated.id = msg_id;
+                        yield Ok(make_update_message_event(
+                            &current_task_id,
+                            updated,
+                            vec!["tool_call".to_owned()],
+                        ));
+                    } else {
+                        final_messages.push(make_tool_call_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            warp_tool,
+                        ));
+                    }
                 }
                 Err(e) => {
                     // 关键:不再把 from_args 失败吞成纯文本(原实现:emit AgentOutput),
@@ -3065,5 +3375,221 @@ fn make_finished_done(
                 request_cost: None,
             },
         )),
+    }
+}
+
+#[cfg(test)]
+mod assistant_buffer_tests {
+    use super::*;
+    use genai::chat::{ChatRole, ToolCall};
+
+    fn reasoning_part(msg: &ChatMessage) -> Option<&str> {
+        for p in msg.content.parts() {
+            if let ContentPart::ReasoningContent(r) = p {
+                return Some(r.as_str());
+            }
+        }
+        None
+    }
+
+    /// gate=false + 真实 reasoning → **丢弃**(zerx-lab/warp #25 修复点)。
+    /// Cerebras / Groq / OpenRouter 等 OpenAI-strict provider 见到字段就 400。
+    #[test]
+    fn no_echo_drops_real_reasoning_text() {
+        let mut buf = AssistantBuffer::new(false);
+        buf.text = Some("Hi".to_string());
+        buf.reasoning = Some("internal thought".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, ChatRole::Assistant);
+        assert!(
+            reasoning_part(&msgs[0]).is_none(),
+            "must not echo reasoning"
+        );
+    }
+
+    /// gate=false + tool_calls + 真实 reasoning → tool_calls 这条也不挂 reasoning。
+    #[test]
+    fn no_echo_drops_reasoning_on_tool_calls_message() {
+        let mut buf = AssistantBuffer::new(false);
+        buf.text = Some("calling".to_string());
+        buf.tool_calls = vec![ToolCall {
+            call_id: "c1".to_string(),
+            fn_name: "echo".to_string(),
+            fn_arguments: serde_json::json!({}),
+            thought_signatures: None,
+        }];
+        buf.reasoning = Some("planning".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 2, "text + tool_calls flush 成两条");
+        for m in &msgs {
+            assert!(
+                reasoning_part(m).is_none(),
+                "any-msg reasoning must be absent"
+            );
+        }
+    }
+
+    /// gate=true + 真实 reasoning → 挂真实值(DeepSeek / Kimi 路径)。
+    #[test]
+    fn echo_keeps_real_reasoning() {
+        let mut buf = AssistantBuffer::new(true);
+        buf.text = Some("ok".to_string());
+        buf.reasoning = Some("thinking...".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(reasoning_part(&msgs[0]), Some("thinking..."));
+    }
+
+    /// gate=true + 无 reasoning → 挂占位符(满足"字段必须存在"校验)。
+    #[test]
+    fn echo_inserts_placeholder_when_empty() {
+        let mut buf = AssistantBuffer::new(true);
+        buf.text = Some("ok".to_string());
+        buf.reasoning = None;
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(reasoning_part(&msgs[0]), Some(REASONING_ECHO_PLACEHOLDER));
+    }
+
+    /// gate=true + tool_calls + 真实 reasoning → text 这条占位,tool_calls 那条挂真实值。
+    #[test]
+    fn echo_with_tool_calls_splits_correctly() {
+        let mut buf = AssistantBuffer::new(true);
+        buf.text = Some("calling".to_string());
+        buf.tool_calls = vec![ToolCall {
+            call_id: "c1".to_string(),
+            fn_name: "echo".to_string(),
+            fn_arguments: serde_json::json!({}),
+            thought_signatures: None,
+        }];
+        buf.reasoning = Some("plan".to_string());
+        let mut msgs = Vec::new();
+        buf.flush_into(&mut msgs);
+        assert_eq!(msgs.len(), 2);
+        // text 这条:占位
+        assert_eq!(reasoning_part(&msgs[0]), Some(REASONING_ECHO_PLACEHOLDER));
+        // tool_calls 这条:真实 reasoning + 含 ToolCall part
+        assert_eq!(reasoning_part(&msgs[1]), Some("plan"));
+        assert!(
+            !msgs[1].content.tool_calls().is_empty(),
+            "second message must carry tool_calls"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dashscope_thinking_tests {
+    use super::*;
+    use crate::settings::ReasoningEffortSetting as R;
+
+    const DASHSCOPE_CN: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1/";
+    const DASHSCOPE_INTL: &str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/";
+
+    #[test]
+    fn dashscope_qwen3_triggers() {
+        assert!(dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen3-235b-a22b",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn dashscope_qwq_triggers() {
+        assert!(dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_INTL,
+            "qwq-32b",
+            R::Medium
+        ));
+    }
+
+    #[test]
+    fn dashscope_deepseek_r1_triggers() {
+        assert!(dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "deepseek-r1",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn dashscope_kimi_k2_thinking_excluded() {
+        // opencode 注释:kimi-k2-thinking 默认就开,不重复注入
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "kimi-k2-thinking",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn dashscope_off_setting_skips() {
+        // 用户主动关思考时尊重之
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen3-30b",
+            R::Off
+        ));
+    }
+
+    #[test]
+    fn dashscope_non_reasoning_model_skips() {
+        // qwen-turbo / qwen2.5 等纯 chat 模型不该被注入
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen-turbo",
+            R::High
+        ));
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            DASHSCOPE_CN,
+            "qwen2.5-72b",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn non_dashscope_url_skips() {
+        // OpenAI / Cerebras / Groq 等不是 DashScope 的 base_url
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            "https://api.openai.com/v1/",
+            "qwen3-30b",
+            R::High
+        ));
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::OpenAi,
+            "https://api.cerebras.ai/v1/",
+            "qwen3-30b",
+            R::High
+        ));
+    }
+
+    #[test]
+    fn non_openai_api_type_skips() {
+        // Anthropic / Gemini / DeepSeek api_type 不走这条路径
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::Anthropic,
+            DASHSCOPE_CN,
+            "qwen3-30b",
+            R::High
+        ));
+        assert!(!dashscope_needs_enable_thinking(
+            AgentProviderApiType::DeepSeek,
+            DASHSCOPE_CN,
+            "deepseek-r1",
+            R::High
+        ));
     }
 }

@@ -832,6 +832,12 @@ pub struct AgentProvider {
     /// 每条同时含 `name`(显示名) 与 `id`(发送给上游 API 的 model 字段值)。
     #[serde(default)]
     pub models: Vec<AgentProviderModel>,
+
+    /// 附加 HTTP 请求头,发给上游 provider 时逐条 merge 进请求。
+    /// 用于需要额外路由头的 gateway(如 Portkey 的 `x-portkey-provider`)。
+    /// `api_key` 仍走 `Authorization: Bearer` 标准路径。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_headers: Vec<(String, String)>,
 }
 
 impl AgentProvider {
@@ -848,6 +854,7 @@ impl AgentProvider {
             api_type: AgentProviderApiType::default(),
             base_url: String::new(),
             models: Vec::new(),
+            extra_headers: Vec::new(),
         }
     }
 }
@@ -1850,6 +1857,20 @@ define_settings_group!(AISettings, settings: [
         private: false,
         toml_path: "agents.warp_agent.other.show_agent_notifications",
         description: "Whether agent notifications are shown.",
+    }
+
+    // OpenWarp T1-2:已完成工具卡默认隐藏(对齐 opencode TUI showDetails 行为)。
+    // true → 默认隐藏 status.is_done() 的 RequestCommandOutput / SearchCodebase /
+    // ReadFiles / Grep / FileGlob / RequestFileEdits 等卡片,只保留 in-progress + error,
+    // 长 session 不被历史卡片堆积淹没新内容。folded 状态可由外观设置面板切换。
+    hide_completed_tool_cards: HideCompletedToolCards {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        private: false,
+        toml_path: "agents.warp_agent.appearance.hide_completed_tool_cards",
+        description: "When true, completed tool action cards (read files, grep, search codebase, requested commands, etc.) are hidden after they finish. In-progress and errored cards are always shown. Useful for long sessions to keep focus on the latest activity.",
     }
 
     // Per-agent, per-host tracking of whether the user dismissed the plugin install chip.
