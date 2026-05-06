@@ -34,7 +34,7 @@ static INSTALL_INSTRUCTIONS: LazyLock<PluginInstructions> = LazyLock::new(|| Plu
     subtitle: crate::t_static!("cli-agent-plugin-deepseek-install-subtitle"),
     steps: vec![PluginInstructionStep {
         description: crate::t_static!("cli-agent-plugin-deepseek-notification-step"),
-        command: "[notifications]\nmethod = \"osc9\"\nthreshold_secs = 1",
+        command: "[tui]\nnotification_condition = \"always\"",
         executable: false,
         link: None,
     }],

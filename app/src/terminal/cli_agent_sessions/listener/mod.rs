@@ -136,7 +136,7 @@ impl CodexSessionHandler {
             cwd: None,
             project: None,
             payload: CLIAgentEventPayload {
-                response: Some(body.to_owned()),
+                query: Some(body.to_owned()),
                 ..Default::default()
             },
         })
@@ -177,10 +177,26 @@ impl CLIAgentSessionHandler for CodexSessionHandler {
 /// emit structured OSC 777 events with a session id.
 struct DeepSeekSessionHandler;
 
+impl DeepSeekSessionHandler {
+    fn notification_title_from_body(body: &str) -> Option<String> {
+        let title = body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .filter(|line| !line.starts_with("deepseek: turn complete"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if title.is_empty() {
+            None
+        } else {
+            Some(title)
+        }
+    }
+}
+
 impl CLIAgentSessionHandler for DeepSeekSessionHandler {
     /// DeepSeek-TUI uses OSC 9 with no title (same channel as Codex).
-    /// We only accept bodies that start with "deepseek:" so we don't
-    /// misfire on unrelated OSC 9 notifications from other tools.
     fn try_parse(&self, title: Option<&str>, body: &str) -> Option<CLIAgentEvent> {
         // Future-proof: try structured JSON first in case a plugin is added later.
         if let Some(parsed) = parse_event(title, body) {
@@ -191,7 +207,7 @@ impl CLIAgentSessionHandler for DeepSeekSessionHandler {
             return None;
         }
         let body = body.trim();
-        if body.is_empty() || !body.starts_with("deepseek:") {
+        if body.is_empty() {
             return None;
         }
         Some(CLIAgentEvent {
@@ -202,7 +218,8 @@ impl CLIAgentSessionHandler for DeepSeekSessionHandler {
             cwd: None,
             project: None,
             payload: CLIAgentEventPayload {
-                query: Some(body.to_owned()),
+                query: Self::notification_title_from_body(body),
+                response: Some(body.to_owned()),
                 ..Default::default()
             },
         })
@@ -418,6 +435,36 @@ mod tests {
             event.payload.response.as_deref(),
             Some("deepseek: turn complete")
         );
+    }
+
+    #[test]
+    fn deepseek_osc9_response_text_becomes_notification_title() {
+        let handler = DeepSeekSessionHandler;
+        let event = handler
+            .try_parse(
+                None,
+                "最新回复内容\ndeepseek: turn complete (1m 15s, $0.01)",
+            )
+            .expect("DeepSeek OSC 9 body should parse");
+
+        assert_eq!(event.event, CLIAgentEventType::Stop);
+        assert_eq!(event.payload.query.as_deref(), Some("最新回复内容"));
+        assert_eq!(
+            event.payload.response.as_deref(),
+            Some("最新回复内容\ndeepseek: turn complete (1m 15s, $0.01)")
+        );
+    }
+
+    #[test]
+    fn deepseek_osc9_plain_response_text_becomes_notification_title() {
+        let handler = DeepSeekSessionHandler;
+        let event = handler
+            .try_parse(None, "最新回复内容")
+            .expect("DeepSeek OSC 9 body should parse");
+
+        assert_eq!(event.event, CLIAgentEventType::Stop);
+        assert_eq!(event.payload.query.as_deref(), Some("最新回复内容"));
+        assert_eq!(event.payload.response.as_deref(), Some("最新回复内容"));
     }
 
     #[test]

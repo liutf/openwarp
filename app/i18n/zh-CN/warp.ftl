@@ -545,6 +545,8 @@ settings-debug-hide-inband-blocks = 隐藏行内命令块
 
 # about_page.rs
 settings-about-copyright = 版权所有 2026 Warp
+settings-about-automatic-updates-label = 自动更新
+settings-about-automatic-updates-description = 开启后,OpenWarp 会在后台检查并下载新版本;关闭后仍可手动检查更新。
 
 # main_page.rs — referral / account
 settings-main-referral-cta = 与朋友和同事分享 Warp,获得奖励
@@ -2877,7 +2879,7 @@ cli-agent-plugin-codex-notification-step = 在 Codex 配置中将通知条件设
 cli-agent-plugin-codex-restart-note = 重启 Codex 以应用更改。
 cli-agent-plugin-deepseek-install-title = 为 DeepSeek 启用 Warp 通知
 cli-agent-plugin-deepseek-install-subtitle = 在 DeepSeek 配置文件（~/.deepseek/config.toml）中添加以下内容，以启用对话完成通知。
-cli-agent-plugin-deepseek-notification-step = 在 ~/.deepseek/config.toml 中将通知方式设为 OSC 9 并降低触发阈值：
+cli-agent-plugin-deepseek-notification-step = 在 ~/.deepseek/config.toml 中将通知条件设为 "always"：
 cli-agent-plugin-deepseek-restart-note = 重启 DeepSeek 以应用更改。
 cli-agent-plugin-claude-install-title = 安装 Claude Code 的 Warp 插件
 cli-agent-plugin-claude-install-subtitle = 确保你的机器已安装 jq，然后运行这些命令。
