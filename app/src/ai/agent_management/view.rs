@@ -1888,13 +1888,6 @@ impl AgentManagementView {
             ));
         }
 
-        if let Some(usage) = card_data.display_request_usage(app) {
-            metadata_parts.push(crate::t!(
-                "agent-management-metadata-credits-used",
-                usage = usage.as_str()
-            ));
-        }
-
         let metadata_text = metadata_parts.join(" • ");
 
         Text::new(metadata_text, font_family, font_size)

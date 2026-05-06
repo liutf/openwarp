@@ -1439,6 +1439,8 @@ impl AISettingsPageView {
 
     fn build_page(subpage: Option<AISubpage>, ctx: &mut ViewContext<Self>) -> PageType<Self> {
         let ai_settings = AISettings::as_ref(ctx);
+        let should_show_usage_widget = !FeatureFlag::UsageBasedPricing.is_enabled()
+            && !UserWorkspaces::as_ref(ctx).is_byo_api_key_enabled();
 
         let mut widgets: Vec<Box<dyn SettingsWidget<View = AISettingsPageView>>> = Vec::new();
 
@@ -1448,7 +1450,7 @@ impl AISettingsPageView {
             None => {
                 // Full page: all widgets (legacy behavior)
                 widgets.push(Box::new(GlobalAIWidget::default()));
-                if !FeatureFlag::UsageBasedPricing.is_enabled() {
+                if should_show_usage_widget {
                     widgets.push(Box::new(UsageWidget::default()));
                 }
                 if ai_settings
@@ -1537,7 +1539,7 @@ impl AISettingsPageView {
                 widgets.push(Box::new(AgentProvidersWidget::new(ctx)));
             }
             Some(AISubpage::Profiles) => {
-                if !FeatureFlag::UsageBasedPricing.is_enabled() {
+                if should_show_usage_widget {
                     widgets.push(Box::new(UsageWidget::default()));
                 }
                 widgets.push(Box::new(AgentsWidget::default()));
@@ -3597,6 +3599,10 @@ impl SettingsPageMeta for AISettingsPageView {
     }
 
     fn on_page_selected(&mut self, _: bool, ctx: &mut ViewContext<Self>) {
+        if UserWorkspaces::as_ref(ctx).is_byo_api_key_enabled() {
+            return;
+        }
+
         AIRequestUsageModel::handle(ctx).update(ctx, |ai_request_usage_model, ctx| {
             ai_request_usage_model.refresh_request_usage_async(ctx)
         });
