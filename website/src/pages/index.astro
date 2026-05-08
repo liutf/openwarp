@@ -151,97 +151,199 @@ const repo = 'https://github.com/zerx-lab/warp';
       </div>
 
       <!-- providers -->
-      <div class="catch-h fade-in">
+      <div class="prov-head fade-in">
+        <div class="prov-eyebrow"><span class="dot"></span><span data-lang="en">PROVIDERS</span><span data-lang="zh">PROVIDERS · 提供方</span></div>
         <h3 data-lang="en">Bring any provider you want.</h3>
         <h3 data-lang="zh">想接什么 provider,就接什么.</h3>
         <p data-lang="en">Six native protocols — OpenAI / OpenAIResp / Anthropic / Gemini / Ollama / DeepSeek — plus any OpenAI-compatible endpoint. One TOML file, no gateway.</p>
         <p data-lang="zh">六套原生协议 ── OpenAI / OpenAIResp / Anthropic / Gemini / Ollama / DeepSeek ── 加任意 OpenAI 兼容端点。一个 TOML 文件,不走 gateway。</p>
       </div>
-      <div class="catch-tabs" role="tablist">
-        <button class="active" data-pf="frontier" type="button">FRONTIER</button>
-        <button data-pf="oss" type="button">GATEWAYS</button>
-        <button data-pf="local" type="button">LOCAL</button>
+      <div class="prov-tabs" role="tablist">
+        <span class="prov-tabs-rail" data-prov-rail></span>
+        <button class="active" data-pf="frontier" type="button">
+          <span class="t" data-lang="en">Frontier</span><span class="t" data-lang="zh">前沿模型</span>
+          <span class="c">3</span>
+        </button>
+        <button data-pf="oss" type="button">
+          <span class="t" data-lang="en">Gateways</span><span class="t" data-lang="zh">聚合 / 网关</span>
+          <span class="c">3</span>
+        </button>
+        <button data-pf="local" type="button">
+          <span class="t" data-lang="en">Local</span><span class="t" data-lang="zh">本地</span>
+          <span class="c">3</span>
+        </button>
       </div>
 
-      <div class="stat-grid" data-pf-pane="frontier">
-        <div class="stat-card">
-          <div class="label">DEEPSEEK</div>
-          <div class="h">deepseek family</div>
-          <div class="sub">native protocol · thinking + tools</div>
-          <div class="bar"><span style="width: 92%"></span></div>
-          <div class="desc" data-lang="en">Native DeepSeek protocol — reasoning trace and tool calling wired through, no compatibility shim.</div>
-          <div class="desc" data-lang="zh">DeepSeek 原生协议,思考链与 tool calling 已打通,没有兼容垫片。</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">ANTHROPIC</div>
-          <div class="h">claude 4.x family</div>
-          <div class="sub">native protocol · prompt cache</div>
-          <div class="bar"><span style="width: 88%"></span></div>
-          <div class="desc" data-lang="en">Tool-use loop, prompt caching and image inputs all bound to the native API.</div>
-          <div class="desc" data-lang="zh">工具循环、prompt cache、图像输入全部绑到原生 API。</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">OPENAI · GEMINI</div>
-          <div class="h">gpt + gemini</div>
-          <div class="sub">native protocol · function calling</div>
-          <div class="bar"><span style="width: 84%"></span></div>
-          <div class="desc" data-lang="en">OpenAI Chat + Responses API and Gemini are first-class — function calling, SSE, no proxy.</div>
-          <div class="desc" data-lang="zh">OpenAI Chat + Responses 与 Gemini 都是一等公民 ── function calling、SSE、不走代理。</div>
-        </div>
+      <div class="prov-grid" data-pf-pane="frontier">
+        <article class="prov-card">
+          <header>
+            <span class="proto native">NATIVE</span>
+            <span class="mark">DeepSeek</span>
+          </header>
+          <h4>deepseek family</h4>
+          <ul class="caps">
+            <li>thinking</li>
+            <li>tools</li>
+            <li>1M ctx</li>
+            <li>SSE</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.deepseek]</span>
+protocol = <span class="s">"deepseek"</span>
+base_url = <span class="s">"…/v1"</span></pre>
+          <p data-lang="en">Native DeepSeek protocol — reasoning trace and tool calling wired through, no compatibility shim.</p>
+          <p data-lang="zh">DeepSeek 原生协议,思考链与 tool calling 已打通,没有兼容垫片。</p>
+        </article>
+
+        <article class="prov-card">
+          <header>
+            <span class="proto native">NATIVE</span>
+            <span class="mark">Anthropic</span>
+          </header>
+          <h4>claude 4.x family</h4>
+          <ul class="caps">
+            <li>tool-use</li>
+            <li>prompt cache</li>
+            <li>vision</li>
+            <li>200k ctx</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.anthropic]</span>
+protocol = <span class="s">"anthropic"</span>
+base_url = <span class="s">"…/v1"</span></pre>
+          <p data-lang="en">Tool-use loop, prompt caching and image inputs all bound to the native API.</p>
+          <p data-lang="zh">工具循环、prompt cache、图像输入全部绑到原生 API。</p>
+        </article>
+
+        <article class="prov-card">
+          <header>
+            <span class="proto native">NATIVE</span>
+            <span class="mark">OpenAI · Gemini</span>
+          </header>
+          <h4>gpt + gemini</h4>
+          <ul class="caps">
+            <li>function calling</li>
+            <li>responses API</li>
+            <li>vision</li>
+            <li>SSE</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.openai]</span>
+protocol = <span class="s">"openai"</span>
+base_url = <span class="s">"…/v1"</span></pre>
+          <p data-lang="en">OpenAI Chat + Responses API and Gemini are first-class — function calling, SSE, no proxy.</p>
+          <p data-lang="zh">OpenAI Chat + Responses 与 Gemini 都是一等公民 ── function calling、SSE、不走代理。</p>
+        </article>
       </div>
 
-      <div class="stat-grid" data-pf-pane="oss" hidden>
-        <div class="stat-card">
-          <div class="label">OPENROUTER</div>
-          <div class="h">aggregator</div>
-          <div class="sub">one key · hundreds of models</div>
-          <div class="bar"><span style="width: 78%"></span></div>
-          <div class="desc" data-lang="en">Point <code>base_url</code> at OpenRouter — one key reaches the whole catalog.</div>
-          <div class="desc" data-lang="zh">把 <code>base_url</code> 指到 OpenRouter,一把 key 接入全目录。</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">QWEN · GLM · KIMI</div>
-          <div class="h">openai-compatible</div>
-          <div class="sub">SiliconFlow / DashScope / Z.ai / Moonshot</div>
-          <div class="bar"><span style="width: 74%"></span></div>
-          <div class="desc" data-lang="en">Self-hosted or hosted — any OpenAI-compatible endpoint just works.</div>
-          <div class="desc" data-lang="zh">自托管或托管均可,任意 OpenAI 兼容端点直连。</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">GROQ · TOGETHER</div>
-          <div class="h">fast inference gateways</div>
-          <div class="sub">openai-compatible · low latency</div>
-          <div class="bar"><span style="width: 72%"></span></div>
-          <div class="desc" data-lang="en">Production-grade hosted inference — drop-in via the OpenAI-compatible adapter.</div>
-          <div class="desc" data-lang="zh">生产级托管推理 ── 通过 OpenAI 兼容适配器直接接入。</div>
-        </div>
+      <div class="prov-grid" data-pf-pane="oss" hidden>
+        <article class="prov-card">
+          <header>
+            <span class="proto compat">OPENAI-COMPAT</span>
+            <span class="mark">OpenRouter</span>
+          </header>
+          <h4>aggregator</h4>
+          <ul class="caps">
+            <li>one key</li>
+            <li>hundreds of models</li>
+            <li>routing</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.router]</span>
+protocol = <span class="s">"openai"</span>
+base_url = <span class="s">"openrouter.ai/api/v1"</span></pre>
+          <p data-lang="en">Point <code>base_url</code> at OpenRouter — one key reaches the whole catalog.</p>
+          <p data-lang="zh">把 <code>base_url</code> 指到 OpenRouter,一把 key 接入全目录。</p>
+        </article>
+
+        <article class="prov-card">
+          <header>
+            <span class="proto compat">OPENAI-COMPAT</span>
+            <span class="mark">Qwen · GLM · Kimi</span>
+          </header>
+          <h4>chinese frontier</h4>
+          <ul class="caps">
+            <li>SiliconFlow</li>
+            <li>DashScope</li>
+            <li>Z.ai</li>
+            <li>Moonshot</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.kimi]</span>
+protocol = <span class="s">"openai"</span>
+base_url = <span class="s">"api.moonshot.cn/v1"</span></pre>
+          <p data-lang="en">Self-hosted or hosted — any OpenAI-compatible endpoint just works.</p>
+          <p data-lang="zh">自托管或托管均可,任意 OpenAI 兼容端点直连。</p>
+        </article>
+
+        <article class="prov-card">
+          <header>
+            <span class="proto compat">OPENAI-COMPAT</span>
+            <span class="mark">Groq · Together</span>
+          </header>
+          <h4>fast inference</h4>
+          <ul class="caps">
+            <li>low latency</li>
+            <li>OSS models</li>
+            <li>SSE</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.groq]</span>
+protocol = <span class="s">"openai"</span>
+base_url = <span class="s">"api.groq.com/openai/v1"</span></pre>
+          <p data-lang="en">Production-grade hosted inference — drop-in via the OpenAI-compatible adapter.</p>
+          <p data-lang="zh">生产级托管推理 ── 通过 OpenAI 兼容适配器直接接入。</p>
+        </article>
       </div>
 
-      <div class="stat-grid" data-pf-pane="local" hidden>
-        <div class="stat-card">
-          <div class="label">OLLAMA</div>
-          <div class="h">native protocol</div>
-          <div class="sub">localhost:11434 · no keys</div>
-          <div class="bar"><span style="width: 70%"></span></div>
-          <div class="desc" data-lang="en">First-class Ollama protocol bound — no key, no network, just <code>ollama serve</code>.</div>
-          <div class="desc" data-lang="zh">原生 Ollama 协议直连,不要 key、不出网,只需要 <code>ollama serve</code>。</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">LM STUDIO</div>
-          <div class="h">openai-compatible</div>
-          <div class="sub">localhost:1234</div>
-          <div class="bar"><span style="width: 60%"></span></div>
-          <div class="desc" data-lang="en">Drop-in OpenAI-compatible endpoint — point <code>base_url</code> and you're done.</div>
-          <div class="desc" data-lang="zh">即插即用的 OpenAI 兼容端点 ── 改 <code>base_url</code> 就完事。</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">VLLM</div>
-          <div class="h">your cluster</div>
-          <div class="sub">your-cluster:8000</div>
-          <div class="bar"><span style="width: 56%"></span></div>
-          <div class="desc" data-lang="en">Production-grade inference on your own hardware, fine-tunes included.</div>
-          <div class="desc" data-lang="zh">生产级推理跑你自己的硬件,微调模型一并支持。</div>
-        </div>
+      <div class="prov-grid" data-pf-pane="local" hidden>
+        <article class="prov-card">
+          <header>
+            <span class="proto native">NATIVE</span>
+            <span class="mark">Ollama</span>
+          </header>
+          <h4>ollama</h4>
+          <ul class="caps">
+            <li>no keys</li>
+            <li>no network</li>
+            <li>localhost:11434</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.ollama]</span>
+protocol = <span class="s">"ollama"</span>
+base_url = <span class="s">"http://127.0.0.1:11434"</span></pre>
+          <p data-lang="en">First-class Ollama protocol bound — no key, no network, just <code>ollama serve</code>.</p>
+          <p data-lang="zh">原生 Ollama 协议直连,不要 key、不出网,只需要 <code>ollama serve</code>。</p>
+        </article>
+
+        <article class="prov-card">
+          <header>
+            <span class="proto compat">OPENAI-COMPAT</span>
+            <span class="mark">LM Studio</span>
+          </header>
+          <h4>lm studio</h4>
+          <ul class="caps">
+            <li>GUI loader</li>
+            <li>localhost:1234</li>
+            <li>GGUF</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.lmstudio]</span>
+protocol = <span class="s">"openai"</span>
+base_url = <span class="s">"http://127.0.0.1:1234/v1"</span></pre>
+          <p data-lang="en">Drop-in OpenAI-compatible endpoint — point <code>base_url</code> and you're done.</p>
+          <p data-lang="zh">即插即用的 OpenAI 兼容端点 ── 改 <code>base_url</code> 就完事。</p>
+        </article>
+
+        <article class="prov-card">
+          <header>
+            <span class="proto compat">OPENAI-COMPAT</span>
+            <span class="mark">vLLM · TGI</span>
+          </header>
+          <h4>your cluster</h4>
+          <ul class="caps">
+            <li>self-hosted</li>
+            <li>fine-tunes</li>
+            <li>tensor parallel</li>
+          </ul>
+          <pre class="snip"><span class="k">[providers.vllm]</span>
+protocol = <span class="s">"openai"</span>
+base_url = <span class="s">"http://gpu-01:8000/v1"</span></pre>
+          <p data-lang="en">Production-grade inference on your own hardware, fine-tunes included.</p>
+          <p data-lang="zh">生产级推理跑你自己的硬件,微调模型一并支持。</p>
+        </article>
       </div>
     </div>
   </section>
