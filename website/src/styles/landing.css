@@ -29,7 +29,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-html, body { overflow-x: hidden; max-width: 100%; }
+html, body { overflow-x: clip; max-width: 100%; }
 body {
   font-family: "Inter Tight", ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   background: var(--bg);
@@ -295,6 +295,7 @@ header.nav.scrolled { box-shadow: 0 8px 28px -18px rgba(15,16,25,0.18); }
 .hero-art {
   position: relative;
   aspect-ratio: 1 / 1;
+  width: 100%;
   max-width: 460px;
   justify-self: end;
   border: 1px solid var(--line);
