@@ -2558,7 +2558,7 @@ drive-import-file-upload-error = 文件上传到服务器失败
 drive-import-folder-upload-error = 文件夹上传到服务器失败
 
 # Drive 主面板和 workflow 编辑器(app/src/drive/index.rs, app/src/drive/workflows/*)
-drive-title = Warp Drive
+drive-title = Drive
 drive-create-team-text = 与团队成员共享命令和知识。
 drive-join-team-header = 与已经在 Warp 上的 { $count } 位团队成员协作。
 drive-environment-variables = 环境变量

@@ -2644,7 +2644,7 @@ drive-import-file-upload-error = Failed to upload file to server
 drive-import-folder-upload-error = Failed to upload folder to server
 
 # Drive main panel and workflow editor (app/src/drive/index.rs, app/src/drive/workflows/*)
-drive-title = Warp Drive
+drive-title = Drive
 drive-create-team-text = Share commands and knowledge with your teammates.
 drive-join-team-header = Collaborate with { $count } of your { $count ->
         [one] teammate
