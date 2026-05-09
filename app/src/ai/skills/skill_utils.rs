@@ -62,6 +62,14 @@ fn try_insert_skill(
 ///
 /// Each element of `skill_paths` is a `(dir_path, skill_file_path)` tuple where
 /// `dir_path` is the directory that owns the skill.
+///
+/// **P0-3 prompt cache 补漏**:返回 Vec 按 `(name, reference)` 字典序排序。
+/// 原因:`dedup_map.into_values()` 来自 `HashMap`,迭代顺序不稳定;
+/// 该返回值会进入 `system prompt` 的 skills section,顺序漂移就会让
+/// 全部上游供应商(Anthropic / OpenAI / DeepSeek)的 prompt cache 全序
+/// 失效。与 P0-3 MCP tools 排序同性质,同步补掉。
+/// 主键: `name`。同名跨目录(`~/.agents/skills/foo` vs `~/.warp/skills/foo`)
+/// 用 `reference` 的字面化路径作 tiebreak,保证同一台机器上顺序唯一。
 #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 pub(crate) fn unique_skills(
     skill_paths: &[(PathBuf, PathBuf)],
@@ -81,7 +89,26 @@ pub(crate) fn unique_skills(
         }
     }
 
-    dedup_map.into_values().collect()
+    let mut out: Vec<SkillDescriptor> = dedup_map.into_values().collect();
+    // P0-3 补漏:按 (name, reference 字面) 字典序排序使 system prompt 稳定。
+    // reference 本身在同一进程内唯一,能避免排序键冲突;不使用
+    // unstable sort 是因为不需要连串“会原位交换”的不稳定行为。
+    out.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| skill_reference_key(&a.reference).cmp(&skill_reference_key(&b.reference)))
+    });
+    out
+}
+
+/// 为 `SkillReference` 生成用于排序的字面化 key。
+/// `Path` 用 `to_string_lossy` 以避免跨平台边界问题;`BundledSkillId`
+/// 直接用 id 字串;两者同 key 不会冲突(bundled id 不含路径分隔符)。
+fn skill_reference_key(reference: &ai::skills::SkillReference) -> String {
+    match reference {
+        ai::skills::SkillReference::Path(p) => p.to_string_lossy().into_owned(),
+        ai::skills::SkillReference::BundledSkillId(id) => id.clone(),
+    }
 }
 
 /// 列出当前 working directory 适用的全部 skills。

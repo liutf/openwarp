@@ -858,20 +858,10 @@ fn build_chat_request(
 
     let tools_array = build_tools_array(params);
 
-    // OpenWarp:整体 sanitize system / messages / tools 中所有会进入 JSON body 的字符串,
-    // 移除 < 0x20 / DEL 控制字符(除 \n \r \t),并把 `\xNN` 这类危险字面量替换为
-    // 普通文字,避免 Anthropic 或中间代理把它们误当成 JSON escape 后 400。
-    // nvim 等 alt-screen TUI 的 grid_contents、tool result、工具描述和 schema description
-    // 都可能带这些片段,所以不能只清理 user message 的 first_text。
-    let system_text = sanitize_text_for_json(&system_text);
-    let messages: Vec<ChatMessage> = messages
-        .into_iter()
-        .map(sanitize_chat_message_for_request)
-        .collect();
-    let tools_array: Vec<GenaiTool> = tools_array
-        .into_iter()
-        .map(sanitize_tool_for_request)
-        .collect();
+    // 出站消息文本透传给 `serde_json` 处理 JSON escape,不再做激进的字符级
+    // sanitize(参考 zed `into_anthropic` / opencode `provider/transform.ts`,
+    // 两者都不在出站层打平控制字符或替换 `\` / `"`)。Anthropic / OpenAI / Gemini
+    // 官方 API 与主流 BYOP 反代均能正确处理 `serde_json` 产出的合法 escape。
 
     // Prompt caching(1:1 移植自 opencode `provider/transform.ts::applyCaching`):
     // - opencode 选 first 2 system message + last 2 non-system message,统一打上
@@ -997,105 +987,6 @@ fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
             }
         })
         .collect();
-}
-
-/// 移除字符串中所有可能让 JSON 序列化产生非法转义的字符:
-/// - 所有 ASCII 控制字符替换成空格,包括换行、回车和 tab
-/// - DEL(0x7f)替换成空格
-/// - 反斜杠替换成 `/`,双引号替换成单引号
-///
-/// 用途:防 ANSI escape 序列、Windows 路径、换行、字符串内引号等内容透到 BYOP 请求体。
-/// 标准 JSON 允许这些 escape,但部分 Anthropic 兼容代理会在转发时把 escape
-/// 处理坏并返回 `invalid escaped character in string`,因此这里统一压平成安全字符。
-fn sanitize_text_for_json(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            c if (c as u32) < 0x20 => out.push(' '),
-            '\u{7f}' => out.push(' '),
-            '\\' => out.push('/'),
-            '"' => out.push('\''),
-            _ => out.push(c),
-        }
-    }
-    replace_dangerous_escape_literals(out)
-}
-
-fn replace_dangerous_escape_literals(mut text: String) -> String {
-    for (from, to) in [
-        ("\\n", " "),
-        ("\\r", " "),
-        ("\\t", " "),
-        ("\\x1b", "ESC"),
-        ("\\x1B", "ESC"),
-        ("\\x03", "Ctrl-C"),
-        ("\\x04", "Ctrl-D"),
-        ("\\x07", "BEL"),
-        ("\\a", "BEL"),
-        ("\\v", "vertical tab"),
-    ] {
-        text = text.replace(from, to);
-    }
-    text
-}
-
-fn sanitize_json_value_for_request(value: Value) -> Value {
-    match value {
-        Value::String(s) => Value::String(sanitize_text_for_json(&s)),
-        Value::Array(values) => Value::Array(
-            values
-                .into_iter()
-                .map(sanitize_json_value_for_request)
-                .collect(),
-        ),
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, value)| (key, sanitize_json_value_for_request(value)))
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
-fn sanitize_chat_message_for_request(mut message: ChatMessage) -> ChatMessage {
-    let parts = message
-        .content
-        .into_parts()
-        .into_iter()
-        .map(|part| match part {
-            ContentPart::Text(text) => ContentPart::Text(sanitize_text_for_json(&text)),
-            // ToolResponse.content 与 ToolCall.fn_arguments 本身就是
-            // `serde_json::to_string` / `serde_json::json!` 产出的合法 JSON,
-            // 让模型按 JSON 协议解析。再过一遍 sanitize_text_for_json 会把
-            // `"` → `'`、`\` → `/`、控制字符压平,把合法 JSON 变成 Python-like
-            // repr,模型彻底无法解析 retry 提示,陷入死循环改格式。
-            // sanitize 仅对 prose(Text / Reasoning / ThoughtSignature)生效,
-            // 结构化字段一律直通。
-            ContentPart::ToolResponse(response) => ContentPart::ToolResponse(response),
-            ContentPart::ToolCall(call) => ContentPart::ToolCall(call),
-            ContentPart::ThoughtSignature(signature) => {
-                ContentPart::ThoughtSignature(sanitize_text_for_json(&signature))
-            }
-            ContentPart::ReasoningContent(reasoning) => {
-                ContentPart::ReasoningContent(sanitize_text_for_json(&reasoning))
-            }
-            ContentPart::Custom(mut custom) => {
-                custom.data = sanitize_json_value_for_request(custom.data);
-                ContentPart::Custom(custom)
-            }
-            other => other,
-        })
-        .collect::<Vec<_>>();
-    message.content = MessageContent::from_parts(parts);
-    message
-}
-
-fn sanitize_tool_for_request(mut tool: GenaiTool) -> GenaiTool {
-    tool.description = tool
-        .description
-        .map(|description| sanitize_text_for_json(&description));
-    tool.schema = tool.schema.map(sanitize_json_value_for_request);
-    tool
 }
 
 /// 重排 messages 中所有 Tool 消息,确保:
