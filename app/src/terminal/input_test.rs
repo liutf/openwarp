@@ -71,7 +71,7 @@ use crate::{
     editor::{DisplayPoint, Point},
     terminal::TerminalView,
 };
-use crate::{experiments, AgentNotificationsModel};
+use crate::experiments;
 use fuzzy_match::FuzzyMatchResult;
 use session_sharing_protocol::common::Role;
 use smol_str::SmolStr;

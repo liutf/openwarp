@@ -2351,8 +2351,11 @@ pub async fn generate_byop_output(
                     // 增量刷新 args,长 args 工具(create_or_edit_document、长 grep 等)体感连续。
                     // web 工具(webfetch/websearch)走自己的 loading 帧链路(L2102 区域),
                     // 这里跳过避免双卡。
+                    // todowrite 走 BYOP todo 拦截器,合成 Message::UpdateTodos 触发 chip,
+                    // 这里也跳过占位避免出现一张无意义的"调用 todowrite"卡。
                     if call.fn_name != tools::webfetch::TOOL_NAME
                         && call.fn_name != tools::websearch::TOOL_NAME
+                        && call.fn_name != tools::todowrite::TOOL_NAME
                     {
                         if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
                             // 已 emit 占位 → 节流增量刷新。
@@ -2493,6 +2496,99 @@ pub async fn generate_byop_output(
                     call.call_id,
                     args_repr,
                 );
+            }
+
+            // OpenWarp BYOP todowrite 拦截:不映射到 protobuf executor,合成
+            // `Message::UpdateTodos` 直接写 conversation.todo_lists 触发 chip + popup
+            // UI(对齐 server-side ClientAction::AddMessagesToTask::UpdateTodos 路径)。
+            // 然后追加 carrier ToolCall + ToolCallResult 给模型 unblock。
+            if call.fn_name == tools::todowrite::TOOL_NAME {
+                let args_str = if call.fn_arguments.is_string() {
+                    call.fn_arguments.as_str().unwrap_or("").to_owned()
+                } else {
+                    call.fn_arguments.to_string()
+                };
+
+                match tools::todowrite::build_update_todos_messages(
+                    &args_str,
+                    &current_task_id,
+                    &request_id,
+                ) {
+                    Ok(todo_msgs) if !todo_msgs.is_empty() => {
+                        // 直接 yield UpdateTodos 让 UI 实时更新 chip。
+                        // 走 AddMessagesToTask:apply_client_action 路径会
+                        // 命中 Message::UpdateTodos 分支 → update_todo_list_from_todo_op
+                        // → emit BlocklistAIHistoryEvent::UpdatedTodoList,UI 自动刷新。
+                        yield Ok(make_add_messages_event(&current_task_id, todo_msgs));
+                        let result_payload = serde_json::json!({
+                            "status": "ok",
+                            "message": "todo list updated",
+                        });
+                        let result_content = serde_json::to_string(&result_payload)
+                            .unwrap_or_else(|_| r#"{"status":"ok"}"#.to_owned());
+                        final_messages.push(make_tool_call_carrier_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            &call.fn_name,
+                            &args_str,
+                        ));
+                        final_messages.push(make_tool_call_result_message(
+                            &current_task_id,
+                            &request_id,
+                            call.call_id.clone(),
+                            result_content,
+                        ));
+                    }
+                    Ok(_) => {
+                        // 空 todos 数组:不 emit UpdateTodos,但仍要给模型 result
+                        // 否则下一轮 chat 会卡(模型等 tool_call_id 的 result)。
+                        let result_content = r#"{"status":"ok","message":"no todos"}"#.to_owned();
+                        final_messages.push(make_tool_call_carrier_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            &call.fn_name,
+                            &args_str,
+                        ));
+                        final_messages.push(make_tool_call_result_message(
+                            &current_task_id,
+                            &request_id,
+                            call.call_id.clone(),
+                            result_content,
+                        ));
+                    }
+                    Err(e) => {
+                        // args 解析失败:跟 from_args 失败一样,emit error tool_result。
+                        log::warn!(
+                            "[byop] todowrite args parse failed: call_id={} err={e:#}",
+                            call.call_id
+                        );
+                        let error_payload = serde_json::json!({
+                            "error": "invalid_arguments",
+                            "detail": e.to_string(),
+                            "tool": call.fn_name,
+                            "received_args": &args_str,
+                            "hint": "Expected { todos: [{ content: string, status: string }] }.",
+                        });
+                        let error_content = serde_json::to_string(&error_payload)
+                            .unwrap_or_else(|_| r#"{"error":"invalid_arguments"}"#.to_owned());
+                        final_messages.push(make_tool_call_carrier_message(
+                            &current_task_id,
+                            &request_id,
+                            &call.call_id,
+                            &call.fn_name,
+                            &args_str,
+                        ));
+                        final_messages.push(make_tool_call_result_message(
+                            &current_task_id,
+                            &request_id,
+                            call.call_id.clone(),
+                            error_content,
+                        ));
+                    }
+                }
+                continue;
             }
 
             // OpenWarp BYOP web 工具拦截:webfetch / websearch 不映射到 protobuf
