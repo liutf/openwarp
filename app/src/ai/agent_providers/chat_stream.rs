@@ -1788,33 +1788,70 @@ fn build_chat_options(
         opts = opts.with_cache_control(CacheControl::Ephemeral);
     }
 
-    // 仅在用户显式选了非 Auto 档位 **且** 模型支持 reasoning 时才注入。
-    // - Auto:不传,让 genai 走"模型名后缀推断"(OpenAI/Anthropic adapter 内部)。
-    // - 非 Auto + 模型不支持:也不传,避免向 claude-3-5-haiku / gpt-4o / gemini-1.5-pro
-    //   等老模型注入 thinking 参数被上游 400 拒绝。
-    if let Some(effort) = effort_setting.to_genai() {
-        if super::reasoning::model_supports_reasoning(api_type, model_id) {
-            // DeepSeek 关闭思考必须走 `extra_body.thinking.type=disabled`,
-            // 服务端不接受 `reasoning_effort: "none"`(400 unknown variant)。
-            // 其他 provider 的 Off 档维持原 reasoning_effort 路径。
-            let deepseek_off = matches!(api_type, AgentProviderApiType::DeepSeek)
-                && matches!(effort_setting, crate::settings::ReasoningEffortSetting::Off);
-            if deepseek_off {
-                log::info!(
-                    "[byop] DeepSeek Off → extra_body thinking.type=disabled (model={model_id})"
-                );
-                opts = opts.with_extra_body(json!({"thinking": {"type": "disabled"}}));
-            } else {
-                log::info!(
-                    "[byop] reasoning_effort injected: model={model_id} setting={effort_setting:?}"
-                );
-                opts = opts.with_reasoning_effort(effort);
-            }
-        } else {
+    // **思考深度档位下发**(对齐 Zed `LanguageModelRequest::thinking_allowed` 各
+    // provider 的处理:`thinking_allowed=false` 时所有 provider 都不发任何 thinking
+    // 字段,Anthropic / Google / Bedrock 服务端默认就是关思考)。
+    //
+    // - **Auto**:不传,让 genai 走"模型名后缀推断"(OpenAI/Anthropic adapter 内部)。
+    // - **Off + Anthropic / Gemini**:**完全跳过 `with_reasoning_effort`**,等同
+    //   Auto + 模型名无 thinking 后缀。genai adapter 走 `(model, None)` 推断分支,
+    //   不调 `insert_anthropic_reasoning` / `thinkingConfig`,不发 thinking 字段。
+    //   ★ 这正好绕开 vendor genai `claude-opus-4-6` / `claude-sonnet-4-6`
+    //   `support_adaptive` 强行注入 `thinking:{type:adaptive}` 的 bug
+    //   (`lib/rust-genai/src/adapter/adapters/anthropic/adapter_impl.rs:121-135`
+    //   不读 effort 是否为 `None`)。
+    // - **Off + DeepSeek**:服务端 `thinking_mode` 默认开启(deepseek-v4-flash 等),
+    //   需要显式 `extra_body.thinking.type=disabled` 才能关闭。OpenWarp 本地 fork
+    //   的 genai 已支持 `ChatOptions::extra_body` 顶层合并。
+    // - **Off + OpenAI / OpenAiResp**:走 `reasoning_effort: "none"` 路径
+    //   (GPT-5 / codex 接受 `none` 档;o-series 由能力表过滤)。
+    // - **非 Off + 模型不支持 reasoning**:跳过,避免给 claude-3-5-haiku / gpt-4o /
+    //   gemini-1.5-pro 等老模型注入 thinking 参数被上游 400 拒绝。
+    use crate::settings::ReasoningEffortSetting as RE;
+    match (api_type, effort_setting) {
+        // Auto:不下发任何参数
+        (_, RE::Auto) => {}
+
+        // Anthropic + Off:不发 thinking 字段
+        (AgentProviderApiType::Anthropic, RE::Off) => {
             log::info!(
-                "[byop] reasoning_effort SKIPPED: model={model_id} not in capability list \
-                 (api_type={api_type:?} setting={effort_setting:?}); request sent without thinking params"
+                "[byop] Anthropic Off → skip reasoning_effort (model={model_id}); \
+                 no thinking field sent"
             );
+        }
+
+        // Gemini + Off:不发 thinkingConfig
+        (AgentProviderApiType::Gemini, RE::Off) => {
+            log::info!(
+                "[byop] Gemini Off → skip reasoning_effort (model={model_id}); \
+                 no thinkingConfig sent"
+            );
+        }
+
+        // DeepSeek + Off:显式 disabled
+        (AgentProviderApiType::DeepSeek, RE::Off) => {
+            log::info!(
+                "[byop] DeepSeek Off → extra_body thinking.type=disabled (model={model_id})"
+            );
+            opts = opts.with_extra_body(json!({"thinking": {"type": "disabled"}}));
+        }
+
+        // 其他(OpenAI / OpenAiResp / Ollama / 各 provider 非 Off 档):
+        // 走能力表过滤后的 reasoning_effort 注入路径
+        _ => {
+            if let Some(effort) = effort_setting.to_genai() {
+                if super::reasoning::model_supports_reasoning(api_type, model_id) {
+                    log::info!(
+                        "[byop] reasoning_effort injected: model={model_id} setting={effort_setting:?}"
+                    );
+                    opts = opts.with_reasoning_effort(effort);
+                } else {
+                    log::info!(
+                        "[byop] reasoning_effort SKIPPED: model={model_id} not in capability list \
+                         (api_type={api_type:?} setting={effort_setting:?}); request sent without thinking params"
+                    );
+                }
+            }
         }
     }
 
@@ -3802,5 +3839,142 @@ mod dashscope_thinking_tests {
             "deepseek-r1",
             R::High
         ));
+    }
+}
+
+/// `build_chat_options` 中"思考深度档位下发"的回归测试。
+///
+/// 对齐 Zed `LanguageModelRequest::thinking_allowed=false` 在各 provider 的处理:
+/// **Off 时所有 provider 都不能让服务端思考**。具体策略按 provider 不同:
+/// - Anthropic / Gemini:不发 thinking 字段(跳过 `with_reasoning_effort`)
+/// - DeepSeek:`extra_body.thinking.type=disabled`(服务端默认开启,需显式关)
+/// - OpenAI / OpenAiResp:`reasoning_effort: "none"`(GPT-5 接受)
+#[cfg(test)]
+mod build_chat_options_off_tests {
+    use super::*;
+    use crate::settings::ReasoningEffortSetting as R;
+    use genai::chat::ReasoningEffort as GE;
+
+    fn opts(
+        api_type: AgentProviderApiType,
+        model: &str,
+        effort: R,
+    ) -> genai::chat::ChatOptions {
+        build_chat_options(api_type, "https://example.com/v1/", model, effort, vec![], None)
+    }
+
+    /// claude-sonnet-4-6(`SUPPORT_ADAPTTIVE_THINK_MODELS` 命中)+ Off 必须**完全
+    /// 不传** `reasoning_effort`,否则 vendor genai adapter 会无条件插入
+    /// `thinking:{type:adaptive}`(`adapter_impl.rs:121-135`)。
+    #[test]
+    fn anthropic_sonnet_4_6_off_skips_reasoning_effort() {
+        let o = opts(AgentProviderApiType::Anthropic, "claude-sonnet-4-6", R::Off);
+        assert!(
+            o.reasoning_effort.is_none(),
+            "Anthropic+Off 必须不传 reasoning_effort,避免 4.6 系强插 adaptive thinking"
+        );
+        assert!(
+            o.extra_body.is_none(),
+            "Anthropic+Off 也不应注入 extra_body"
+        );
+    }
+
+    /// claude-opus-4-6 同上(双重命中 SUPPORT_EFFORT + SUPPORT_ADAPTIVE)。
+    #[test]
+    fn anthropic_opus_4_6_off_skips_reasoning_effort() {
+        let o = opts(AgentProviderApiType::Anthropic, "claude-opus-4-6", R::Off);
+        assert!(o.reasoning_effort.is_none());
+        assert!(o.extra_body.is_none());
+    }
+
+    /// claude-opus-4-7+ + Off:虽然不在 adaptive 名单(本来就 OK),仍应一致跳过。
+    #[test]
+    fn anthropic_opus_4_7_off_skips_reasoning_effort() {
+        let o = opts(AgentProviderApiType::Anthropic, "claude-opus-4-7", R::Off);
+        assert!(o.reasoning_effort.is_none());
+        assert!(o.extra_body.is_none());
+    }
+
+    /// Anthropic + High 仍走原 reasoning_effort 路径。
+    #[test]
+    fn anthropic_high_injects_reasoning_effort() {
+        let o = opts(AgentProviderApiType::Anthropic, "claude-opus-4-7", R::High);
+        assert!(matches!(o.reasoning_effort, Some(GE::High)));
+    }
+
+    /// Anthropic + Auto 不传任何参数。
+    #[test]
+    fn anthropic_auto_skips() {
+        let o = opts(AgentProviderApiType::Anthropic, "claude-opus-4-7", R::Auto);
+        assert!(o.reasoning_effort.is_none());
+    }
+
+    /// Gemini + Off:不发 thinkingConfig。
+    #[test]
+    fn gemini_off_skips_reasoning_effort() {
+        let o = opts(AgentProviderApiType::Gemini, "gemini-2.5-pro", R::Off);
+        assert!(o.reasoning_effort.is_none());
+        assert!(o.extra_body.is_none());
+    }
+
+    /// Gemini + Medium 走 thinkingBudget 路径。
+    #[test]
+    fn gemini_medium_injects_reasoning_effort() {
+        let o = opts(AgentProviderApiType::Gemini, "gemini-2.5-pro", R::Medium);
+        assert!(matches!(o.reasoning_effort, Some(GE::Medium)));
+    }
+
+    /// DeepSeek + Off:必须发 `extra_body.thinking.type=disabled`,
+    /// 而**不能**走 reasoning_effort=none(服务端 400 unknown variant)。
+    #[test]
+    fn deepseek_off_uses_extra_body_disabled() {
+        let o = opts(AgentProviderApiType::DeepSeek, "deepseek-v4-flash", R::Off);
+        assert!(
+            o.reasoning_effort.is_none(),
+            "DeepSeek+Off 不能走 reasoning_effort=none"
+        );
+        let body = o.extra_body.as_ref().expect("extra_body must be set");
+        assert_eq!(
+            body.pointer("/thinking/type"),
+            Some(&serde_json::Value::String("disabled".to_string())),
+            "DeepSeek+Off 必须发 thinking.type=disabled"
+        );
+    }
+
+    /// DeepSeek + High 走 reasoning_effort 顶层字段。
+    #[test]
+    fn deepseek_high_injects_reasoning_effort() {
+        let o = opts(AgentProviderApiType::DeepSeek, "deepseek-reasoner", R::High);
+        assert!(matches!(o.reasoning_effort, Some(GE::High)));
+        assert!(o.extra_body.is_none());
+    }
+
+    /// OpenAI(GPT-5)+ Off:走 reasoning_effort=none(GPT-5 接受 `none` 档)。
+    #[test]
+    fn openai_gpt5_off_uses_reasoning_effort_none() {
+        let o = opts(AgentProviderApiType::OpenAi, "gpt-5", R::Off);
+        assert!(
+            matches!(o.reasoning_effort, Some(GE::None)),
+            "OpenAI+GPT-5+Off 应发 reasoning_effort=none"
+        );
+    }
+
+    /// 不支持 reasoning 的模型 + 任意非 Auto 档位:跳过(避免上游 400)。
+    #[test]
+    fn anthropic_haiku_3_5_off_skips() {
+        let o = opts(
+            AgentProviderApiType::Anthropic,
+            "claude-3-5-haiku-20241022",
+            R::Off,
+        );
+        assert!(o.reasoning_effort.is_none());
+        assert!(o.extra_body.is_none());
+    }
+
+    #[test]
+    fn openai_gpt4o_off_skips() {
+        // gpt-4o 不在 reasoning 名单,Off 也跳过
+        let o = opts(AgentProviderApiType::OpenAi, "gpt-4o", R::Off);
+        assert!(o.reasoning_effort.is_none());
     }
 }

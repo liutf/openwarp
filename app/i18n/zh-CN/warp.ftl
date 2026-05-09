@@ -545,8 +545,13 @@ settings-debug-hide-inband-blocks = 隐藏行内命令块
 
 # about_page.rs
 settings-about-copyright = 版权所有 2026 Warp
-settings-about-automatic-updates-label = 自动更新
-settings-about-automatic-updates-description = 开启后,OpenWarp 会在后台检查并下载新版本;关闭后仍可手动检查更新。
+settings-about-automatic-updates-label = 自动检查更新
+settings-about-automatic-updates-description = 开启后,OpenWarp 会在后台定期检查是否有新版本;发现新版本后会在上方提示并提供 GitHub 下载链接。OpenWarp 不会自动下载或安装更新。
+settings-about-update-checking = 正在检查更新…
+settings-about-update-up-to-date = 已是最新版本。
+settings-about-update-available = 发现新版本 { $version }。
+settings-about-update-check-now = 检查更新
+settings-about-update-open-release = 前往 GitHub 下载
 
 # main_page.rs — referral / account
 settings-main-referral-cta = 与朋友和同事分享 Warp,获得奖励

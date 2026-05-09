@@ -559,7 +559,12 @@ settings-debug-hide-inband-blocks = Hide in-band command blocks
 # about_page.rs
 settings-about-copyright = Copyright 2026 Warp
 settings-about-automatic-updates-label = Automatic updates
-settings-about-automatic-updates-description = When enabled, OpenWarp checks for and downloads new versions in the background. When disabled, you can still check for updates manually.
+settings-about-automatic-updates-description = When enabled, OpenWarp checks for new versions in the background. When a new version is available, it will be shown above with a link to download manually from GitHub. OpenWarp never downloads or installs updates automatically.
+settings-about-update-checking = Checking for updates…
+settings-about-update-up-to-date = OpenWarp is up to date.
+settings-about-update-available = New version { $version } is available.
+settings-about-update-check-now = Check for updates
+settings-about-update-open-release = Download from GitHub
 
 # main_page.rs — referral / account
 settings-main-referral-cta = Earn rewards by sharing Warp with friends & colleagues
