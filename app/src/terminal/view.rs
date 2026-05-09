@@ -14534,6 +14534,17 @@ impl TerminalView {
             }
         }
 
+        // Then check if there's selected text inside any AI block (rich content). The grid-level
+        // `selection_to_string` below ignores AI block `SelectableArea` selections, so without this
+        // branch Ctrl+Shift+C silently does nothing when the user has selected text inside an AI reply.
+        if let Some(selected_text) = self.selected_text_from_visible_ai_blocks(ctx) {
+            if !selected_text.is_empty() {
+                ctx.clipboard()
+                    .write(ClipboardContent::plain_text(selected_text));
+            }
+            return;
+        }
+
         // Then check if there's selected text in the cloud mode error screen
         let error_selected_text = self
             .ambient_agent_view_model
@@ -18613,6 +18624,19 @@ impl TerminalView {
         })
     }
 
+    /// 在所有可见的 AI block 子视图层里查找已被用户选中的文本。
+    ///
+    /// AI block 的 rich content 选区由 `SelectableArea` 维护,与终端 grid 选区是两套
+    /// 互不通气的系统;`selection_to_string` 只会读 grid 选区,因此 Ctrl+Shift+C 与右键
+    /// 菜单的 `Copy` 都会漏掉 AI block 内的选区。这里集中提供一个兜底:遍历所有 AI block,
+    /// 取第一个 `selected_text(ctx).is_some()` 的结果即可。
+    fn selected_text_from_visible_ai_blocks(&self, ctx: &AppContext) -> Option<String> {
+        self.rich_content_views.iter().find_map(|rich_content| {
+            let ai_metadata = rich_content.ai_block_metadata()?;
+            ai_metadata.ai_block_handle.as_ref(ctx).selected_text(ctx)
+        })
+    }
+
     /// Returns the last block's `EnvVarCollectionBlock` if it is uncompleted, scoped to the
     /// currently visible conversation.
     fn active_env_var_collection_block(
@@ -18917,8 +18941,20 @@ impl TerminalView {
     }
 
     fn context_menu_copy_selected_text(&mut self, ctx: &mut ViewContext<Self>) {
+        send_telemetry_from_ctx!(TelemetryEvent::ContextMenuCopySelectedText, ctx);
+
+        // 优先试 AI block 内选区(详见 `selected_text_from_visible_ai_blocks` 注释)。
+        // 放在 `model.lock()` 之前,避免在终端模型锁持锁期间调用可能再次加锁的代码。
+        if let Some(selected_text) = self.selected_text_from_visible_ai_blocks(ctx) {
+            if !selected_text.is_empty() {
+                ctx.clipboard()
+                    .write(ClipboardContent::plain_text(selected_text));
+            }
+            self.close_context_menu(ctx, true);
+            return;
+        }
+
         {
-            send_telemetry_from_ctx!(TelemetryEvent::ContextMenuCopySelectedText, ctx);
             let semantic_selection = SemanticSelection::as_ref(ctx);
             let model = self.model.lock();
             if let Some(selected_text) =
