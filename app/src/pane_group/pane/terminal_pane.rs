@@ -12,10 +12,7 @@ use warpui::{
 };
 
 use crate::{
-    ai::{
-        blocklist::BlocklistAIHistoryModel,
-        llms::LLMPreferences, skills::SkillManager,
-    },
+    ai::{blocklist::BlocklistAIHistoryModel, llms::LLMPreferences, skills::SkillManager},
     app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot},
     pane_group::{self, Direction, Event::OpenConversationHistory, PaneGroup},
     persistence::{BlockCompleted, ModelEvent},

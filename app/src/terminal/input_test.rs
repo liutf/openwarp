@@ -63,6 +63,7 @@ use crate::terminal::model::terminal_model::BlockIndex;
 use chrono::Local;
 use warpui::text::SelectionType;
 
+use crate::experiments;
 use crate::terminal::shell::ShellType;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::themes::theme::AnsiColorIdentifier;
@@ -71,7 +72,6 @@ use crate::{
     editor::{DisplayPoint, Point},
     terminal::TerminalView,
 };
-use crate::experiments;
 use fuzzy_match::FuzzyMatchResult;
 use session_sharing_protocol::common::Role;
 use smol_str::SmolStr;

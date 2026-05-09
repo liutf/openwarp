@@ -1694,14 +1694,41 @@ pub(super) fn build_client(
     // 用 native fetch / std HTTP 不主动协商 gzip on SSE,所以同代理无问题。
     //
     // 这里显式构造 `WebConfig` 即使 genai default 已经 `gzip=false`(fork 修改)。
+    //
+    // User-Agent 动态绑定当前应用名(取自 `ChannelState::app_id().application_name()`,
+    // 由入口 bin 注册:`bin/oss.rs` → "OpenWarp";其它 channel 自带各自名称)。
+    // 这样上游服务能识别请求来自哪个分支构建,后续若改名也会自动跟随。
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Ok(value) = build_user_agent_header() {
+        headers.insert(reqwest::header::USER_AGENT, value);
+    }
     let web_config = WebConfig {
         gzip: false,
+        default_headers: Some(headers),
         ..WebConfig::default()
     };
     Client::builder()
         .with_web_config(web_config)
         .with_service_target_resolver(resolver)
         .build()
+}
+
+/// 构造 BYOP 出站请求的 `User-Agent` 头,值形如:
+/// - `OpenWarp/<git-tag>` —— release 构建有 `GIT_RELEASE_TAG` 注入时
+/// - `OpenWarp` —— Dev / 本地构建无版本时
+///
+/// 应用名一律从 `ChannelState::app_id().application_name()` 取,确保与入口 bin
+/// 注册的 `AppId` 一致(`bin/oss.rs` 注册 "OpenWarp")。
+fn build_user_agent_header(
+) -> Result<reqwest::header::HeaderValue, reqwest::header::InvalidHeaderValue> {
+    let app_name = warp_core::channel::ChannelState::app_id()
+        .application_name()
+        .to_owned();
+    let ua = match warp_core::channel::ChannelState::app_version() {
+        Some(v) if !v.is_empty() => format!("{app_name}/{v}"),
+        _ => app_name,
+    };
+    reqwest::header::HeaderValue::from_str(&ua)
 }
 
 /// 判定是否给 DashScope(阿里云百炼,OpenAI 兼容路径)注入 `enable_thinking: true`。

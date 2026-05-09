@@ -15,6 +15,7 @@ app/src/server/graphql/schema/generated
 crates/command-signatures-v2/js/build
 crates/command-signatures-v2/js/node_modules
 .worktree
+/docs
 .worktrees
 /target-check
 # For testing changes to the channel versions file

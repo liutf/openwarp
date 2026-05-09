@@ -310,8 +310,8 @@ impl AgentViewZeroStateBlock {
     ) -> Vec<ConversationNavigationData> {
         ConversationNavigationData::all_conversations(app)
             .into_iter()
-            .filter(|conversation_data| {
-                match conversation_data.latest_working_directory.as_ref() {
+            .filter(
+                |conversation_data| match conversation_data.latest_working_directory.as_ref() {
                     Some(latest_working_directory) => {
                         latest_working_directory == current_working_directory
                     }
@@ -321,8 +321,8 @@ impl AgentViewZeroStateBlock {
                         .is_some_and(|initial_working_directory| {
                             initial_working_directory == current_working_directory
                         }),
-                }
-            })
+                },
+            )
             .sorted_by_key(|conversation_data| Reverse(conversation_data.last_updated))
             .take(MAX_RECENT_CONVERSATION_COUNT)
             .collect()

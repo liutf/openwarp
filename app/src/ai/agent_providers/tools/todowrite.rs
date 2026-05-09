@@ -135,8 +135,8 @@ pub fn build_update_todos_messages(
     task_id: &str,
     request_id: &str,
 ) -> Result<Vec<api::Message>> {
-    let parsed: Args = serde_json::from_str(args_str)
-        .map_err(|e| anyhow!("todowrite args parse error: {e}"))?;
+    let parsed: Args =
+        serde_json::from_str(args_str).map_err(|e| anyhow!("todowrite args parse error: {e}"))?;
 
     // 全部 todos 进 pending(顺序保持模型给的顺序),这是 CreateTodoList 的入口。
     let initial_todos: Vec<api::TodoItem> = parsed.todos.iter().map(to_todo_item).collect();
@@ -181,9 +181,11 @@ fn make_update_todos_message(
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
         citations: vec![],
-        message: Some(api::message::Message::UpdateTodos(api::message::UpdateTodos {
-            operation: Some(operation),
-        })),
+        message: Some(api::message::Message::UpdateTodos(
+            api::message::UpdateTodos {
+                operation: Some(operation),
+            },
+        )),
         request_id: request_id.to_owned(),
         timestamp: None,
     }

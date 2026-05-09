@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
-use crate::workspace::view::conversation_list::view_model::ConversationOrTaskId;
 use crate::appearance::Appearance;
 use crate::editor::{
     EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys,
@@ -21,6 +20,7 @@ use crate::workspace::view::conversation_list::item::{
     render_item, render_static_item, ItemProps, ItemState, OverflowMenuDisplay, StaticItemProps,
     STATIC_ITEM_MIN_HEIGHT,
 };
+use crate::workspace::view::conversation_list::view_model::ConversationOrTaskId;
 use crate::workspace::ToastStack;
 use crate::workspace::WorkspaceAction;
 use warp_core::ui::Icon;
