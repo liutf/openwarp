@@ -13,7 +13,7 @@ use warpui::{
 
 use crate::{
     ai::{
-        active_agent_views_model::ActiveAgentViewsModel, blocklist::BlocklistAIHistoryModel,
+        blocklist::BlocklistAIHistoryModel,
         llms::LLMPreferences, skills::SkillManager,
     },
     app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot},
@@ -291,15 +291,7 @@ impl PaneContent for TerminalPane {
         agent_view_controller.update(ctx, |controller, _ctx| {
             controller.set_pane_group_id(pane_group_id);
         });
-        let active_session = terminal_view.as_ref(ctx).active_session().clone();
-        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
-            model.register_agent_view_controller(
-                &agent_view_controller,
-                &active_session,
-                terminal_view_id,
-                ctx,
-            );
-        });
+        let _ = (agent_view_controller, terminal_view_id);
     }
 
     fn detach(
@@ -331,14 +323,7 @@ impl PaneContent for TerminalPane {
             ctx.unsubscribe_to_view(&view);
         }
 
-        // Notify the active agent views model that the terminal view has been closed
-        // (and that any active views are no longer active). On a `HiddenForClose` detach,
-        // `attach` will re-register via `register_agent_view_controller` when the tab is
-        // restored, so this is safe to run unconditionally.
         let terminal_view_id = self.terminal_view(ctx).id();
-        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
-            model.unregister_agent_view_controller(terminal_view_id, ctx);
-        });
 
         // Clean up any active CLI agent session so its notification is removed.
         // Skip this for moves — the session is still running and will re-register in the new tab.

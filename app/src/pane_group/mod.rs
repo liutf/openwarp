@@ -1,4 +1,3 @@
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIAgentHarness, AIConversation, AIConversationId};
 use crate::ai::agent_conversations_model::{
@@ -3700,13 +3699,7 @@ impl PaneGroup {
             }
         };
 
-        // Register the transcript viewer as an ambient session so it appears in the Active section
-        // of the conversation list.
-        if let Some(task_id) = ambient_agent_task_id {
-            ActiveAgentViewsModel::handle(ctx).update(ctx, |active_views, ctx| {
-                active_views.register_ambient_session(terminal_view.id(), task_id, ctx);
-            });
-        }
+        let _ = ambient_agent_task_id;
 
         // Insert the conversation ended tombstone (includes Open in Warp button on WASM).
         if terminal_manager.is_some() {
@@ -5430,13 +5423,7 @@ impl PaneGroup {
             history_model.mark_terminal_view_as_conversation_transcript_viewer(terminal_view.id());
         });
 
-        // Register the transcript viewer as an ambient session so it appears in the Active section
-        // of the conversation list.
-        if let Some(task_id) = ambient_agent_task_id {
-            ActiveAgentViewsModel::handle(ctx).update(ctx, |active_views, ctx| {
-                active_views.register_ambient_session(terminal_view.id(), task_id, ctx);
-            });
-        }
+        let _ = ambient_agent_task_id;
 
         (terminal_view, terminal_manager)
     }

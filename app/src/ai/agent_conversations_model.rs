@@ -1,4 +1,3 @@
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
@@ -772,19 +771,11 @@ impl ConversationOrTask<'_> {
                     }
                 }),
                 ConversationOrTask::Conversation(metadata) => {
-                    let is_active = ActiveAgentViewsModel::as_ref(app)
-                        .is_conversation_open(metadata.nav_data.id, app);
                     let nav_data = &metadata.nav_data;
                     Some(WorkspaceAction::RestoreOrNavigateToConversation {
                         conversation_id: nav_data.id,
                         window_id: nav_data.window_id,
-                        // Only try to navigate to the pane if the conversation is actually active.
-                        //
-                        // Otherwise, we should open in a new tab or pane according to the user's
-                        // setting.
-                        pane_view_locator: is_active
-                            .then_some(nav_data.pane_view_locator)
-                            .flatten(),
+                        pane_view_locator: nav_data.pane_view_locator,
                         terminal_view_id: nav_data.terminal_view_id,
                         restore_layout,
                     })
@@ -895,11 +886,6 @@ impl AgentConversationsModel {
         let history_model = BlocklistAIHistoryModel::handle(ctx);
         ctx.subscribe_to_model(&history_model, move |me, event, ctx| {
             me.handle_history_event(event, ctx);
-        });
-
-        let active_views_model = ActiveAgentViewsModel::handle(ctx);
-        ctx.subscribe_to_model(&active_views_model, |me, _event, ctx| {
-            me.sync_conversations(ctx);
         });
 
         // Subscribe to UpdateManager for RTC task updates

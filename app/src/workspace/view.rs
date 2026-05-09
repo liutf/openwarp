@@ -28,17 +28,8 @@ use crate::workspace::cross_window_tab_drag::{
 };
 pub(crate) use onboarding::OnboardingTutorial;
 
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
 use crate::ai::agent_conversations_model::ConversationOrTask;
-use crate::ai::agent_management::notifications::toast_stack::AgentNotificationToastStack;
-use crate::ai::agent_management::notifications::view::{
-    NotificationMailboxView, NotificationMailboxViewEvent,
-};
-use crate::ai::agent_management::notifications::NotificationFilter;
-use crate::ai::agent_management::telemetry::AgentManagementTelemetryEvent;
-use crate::ai::agent_management::view::{AgentManagementView, AgentManagementViewEvent};
-use crate::ai::agent_management::AgentManagementEvent;
 use crate::ai::ambient_agents::telemetry::{CloudAgentTelemetryEvent, CloudModeEntryPoint};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::agent_view::agent_input_footer::editor::AgentToolbarEditorMode;
@@ -304,7 +295,7 @@ use crate::terminal::{self, SizeInfo, TerminalView};
 #[cfg(target_os = "macos")]
 use crate::workspace::cli_install;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::{report_if_error, AgentNotificationsModel};
+use crate::report_if_error;
 use ::settings::{Setting, ToggleableSetting};
 use warp_core::features::FeatureFlag;
 
@@ -991,9 +982,6 @@ pub struct Workspace {
     left_panel_views: Vec<ToolPanelView>,
     right_panel_view: ViewHandle<RightPanelView>,
     working_directories_model: ModelHandle<pane_group::WorkingDirectoriesModel>,
-    agent_management_view: ViewHandle<AgentManagementView>,
-    notification_mailbox_view: Option<ViewHandle<NotificationMailboxView>>,
-    notification_toast_stack: Option<ViewHandle<AgentNotificationToastStack>>,
     lightbox_view: Option<ViewHandle<LightboxView>>,
     hoa_onboarding_flow: Option<ViewHandle<HoaOnboardingFlow>>,
     /// Pinned position for the vertical tabs callout so it doesn't move when
@@ -2641,62 +2629,6 @@ impl Workspace {
             me.handle_right_panel_event(event.clone(), ctx);
         });
 
-        // Get persisted filters from window snapshot if restoring.
-        let agent_management_filters = match workspace_setting {
-            NewWorkspaceSource::Restored {
-                ref window_snapshot,
-                ..
-            } => window_snapshot.agent_management_filters.clone(),
-            _ => None,
-        };
-        let agent_management_view = ctx
-            .add_typed_action_view(|ctx| AgentManagementView::new(agent_management_filters, ctx));
-        ctx.subscribe_to_view(&agent_management_view, |me, _, event, ctx| {
-            me.handle_agent_management_view_event(event, ctx);
-        });
-
-        let notification_mailbox_view = if FeatureFlag::HOANotifications.is_enabled() {
-            let view = ctx.add_typed_action_view(NotificationMailboxView::new);
-            ctx.subscribe_to_view(&view, move |me, _, event, ctx| match event {
-                NotificationMailboxViewEvent::NavigateToTerminal {
-                    terminal_view_id, ..
-                } => {
-                    me.current_workspace_state.is_notification_mailbox_open = false;
-                    me.tab_bar_pinned_by_popup = false;
-                    me.sync_window_button_visibility(ctx);
-                    if let Some(stack) = &me.notification_toast_stack {
-                        stack.update(ctx, |stack, ctx| stack.set_mailbox_open(false, ctx));
-                    }
-                    me.handle_action(
-                        &WorkspaceAction::FocusTerminalViewInWorkspace {
-                            terminal_view_id: *terminal_view_id,
-                        },
-                        ctx,
-                    );
-                    ctx.notify();
-                }
-                NotificationMailboxViewEvent::Dismissed => {
-                    me.current_workspace_state.is_notification_mailbox_open = false;
-                    me.tab_bar_pinned_by_popup = false;
-                    me.sync_window_button_visibility(ctx);
-                    if let Some(stack) = &me.notification_toast_stack {
-                        stack.update(ctx, |stack, ctx| stack.set_mailbox_open(false, ctx));
-                    }
-                    me.focus_active_tab(ctx);
-                    ctx.notify();
-                }
-            });
-            Some(view)
-        } else {
-            None
-        };
-
-        let notification_toast_stack = if FeatureFlag::HOANotifications.is_enabled() {
-            Some(ctx.add_typed_action_view(AgentNotificationToastStack::new))
-        } else {
-            None
-        };
-
         let ai_assistant_panel =
             Self::build_ai_assistant_panel_view(ctx, server_api.clone(), ai_client.clone());
 
@@ -2716,11 +2648,6 @@ impl Workspace {
         ctx.subscribe_to_model(&CLIAgentSessionsModel::handle(ctx), |me, _, event, ctx| {
             me.handle_cli_agent_sessions_event(event, ctx);
         });
-
-        ctx.subscribe_to_model(
-            &AgentNotificationsModel::handle(ctx),
-            Self::handle_agent_management_event,
-        );
 
         ctx.subscribe_to_model(
             &SessionSettings::handle(ctx),
@@ -3039,9 +2966,6 @@ impl Workspace {
                 tab_pane_group_id: None,
             },
             openwarp_launch_modal: openwarp_launch_view,
-            agent_management_view,
-            notification_mailbox_view,
-            notification_toast_stack,
             codex_modal,
             free_tier_limit_hit_modal,
             free_tier_limit_check_triggered: false,
@@ -3098,67 +3022,6 @@ impl Workspace {
             .any(|tab| tab.pane_group.id() == pane_group_id);
         if has_tab {
             ctx.notify();
-        }
-    }
-
-    fn handle_agent_management_event(
-        &mut self,
-        _handle: ModelHandle<AgentNotificationsModel>,
-        event: &AgentManagementEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        // Only process events for the active window.
-        if ctx
-            .windows()
-            .active_window()
-            .is_none_or(|id| id != ctx.window_id())
-        {
-            return;
-        }
-
-        match event {
-            AgentManagementEvent::ConversationNeedsAttention {
-                window_id: source_window_id,
-                tab_index,
-                terminal_view_id,
-                conversation_id,
-            } => {
-                if FeatureFlag::HOANotifications.is_enabled() {
-                    return;
-                }
-
-                let history_model = BlocklistAIHistoryModel::as_ref(ctx);
-                let Some(conversation) = history_model.conversation(conversation_id) else {
-                    return;
-                };
-
-                let Some(latest_query) = conversation
-                    .latest_user_query()
-                    .map(|latest_query| latest_query.to_owned())
-                else {
-                    return;
-                };
-                let icon = conversation.status().render_icon(Appearance::as_ref(ctx));
-
-                self.agent_toast_stack
-                    .update(ctx, |agent_toast_stack, ctx| {
-                        let toast = AgentToast::new(
-                            latest_query,
-                            icon,
-                            *source_window_id,
-                            *tab_index,
-                            *terminal_view_id,
-                        );
-                        agent_toast_stack.add_toast(toast.clone(), ctx)
-                    });
-                ctx.notify();
-            }
-            AgentManagementEvent::NotificationAdded { .. }
-            | AgentManagementEvent::NotificationUpdated
-            | AgentManagementEvent::AllNotificationsMarkedRead => {
-                // Re-render so the vertical tabs panel can update unread-activity dots.
-                ctx.notify();
-            }
         }
     }
 
@@ -3885,13 +3748,10 @@ impl Workspace {
             });
 
         if let Some(nav_data) = nav_data {
-            let is_active =
-                ActiveAgentViewsModel::as_ref(ctx).is_conversation_open(nav_data.id, ctx);
-            let pane_view_locator = is_active.then_some(nav_data.pane_view_locator).flatten();
             self.restore_or_navigate_to_conversation(
                 nav_data.id,
                 nav_data.window_id,
-                pane_view_locator,
+                nav_data.pane_view_locator,
                 nav_data.terminal_view_id,
                 Some(RestoreConversationLayout::NewTab),
                 ctx,
@@ -4675,22 +4535,12 @@ impl Workspace {
         task_id: AmbientAgentTaskId,
         ctx: &AppContext,
     ) -> Option<usize> {
-        // First, check ActiveAgentViewsModel for the terminal view that has this task registered.
-        // This is the authoritative source since it's updated when the session is joined.
-        let active_terminal_view_id =
-            ActiveAgentViewsModel::as_ref(ctx).get_terminal_view_id_for_ambient_task(task_id);
-
         self.tabs.iter().enumerate().find_map(|(index, tab)| {
             let pane_group = tab.pane_group.as_ref(ctx);
             let has_task = pane_group.terminal_pane_ids().into_iter().any(|pane_id| {
                 pane_group
                     .terminal_view_from_pane_id(pane_id, ctx)
                     .is_some_and(|tv| {
-                        // Check if this is the terminal view registered in ActiveAgentViewsModel
-                        if active_terminal_view_id == Some(tv.id()) {
-                            return true;
-                        }
-                        // Fall back to checking the terminal model directly
                         tv.as_ref(ctx).model.lock().ambient_agent_task_id() == Some(task_id)
                     })
             });
@@ -4791,23 +4641,7 @@ impl Workspace {
         ambient_agent_task_id: Option<AmbientAgentTaskId>,
         ctx: &mut ViewContext<Self>,
     ) {
-        let window_id = ctx.window_id();
-        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
-            model.handle_pane_focus_change(
-                window_id,
-                focused_terminal_view_id,
-                ambient_agent_task_id,
-                ctx,
-            );
-        });
-        if let Some(terminal_view_id) = focused_terminal_view_id {
-            let is_active_window = ctx.windows().active_window() == Some(ctx.window_id());
-            if is_active_window {
-                AgentNotificationsModel::handle(ctx).update(ctx, |model, ctx| {
-                    model.mark_items_from_terminal_view_read(terminal_view_id, ctx);
-                });
-            }
-        }
+        let _ = (focused_terminal_view_id, ambient_agent_task_id, ctx);
     }
 
     /// Change the active tab index. This must be used instead of setting `self.active_tab_index`
@@ -5504,34 +5338,6 @@ impl Workspace {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn handle_agent_management_view_event(
-        &mut self,
-        event: &AgentManagementViewEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        match event {
-            AgentManagementViewEvent::OpenNewTabAndRunWorkflow(workflow) => {
-                self.add_terminal_tab(false, ctx);
-                self.run_workflow_in_active_input(
-                    workflow,
-                    WorkflowSource::App,
-                    WorkflowSelectionSource::Undefined,
-                    None,
-                    TerminalSessionFallbackBehavior::default(),
-                    ctx,
-                );
-            }
-            AgentManagementViewEvent::OpenPlanNotebook { notebook_uid } => {
-                self.open_notebook(
-                    &NotebookSource::Existing((*notebook_uid).into()),
-                    &OpenWarpDriveObjectSettings::default(),
-                    ctx,
-                    false,
-                );
-            }
         }
     }
 
@@ -7724,33 +7530,8 @@ impl Workspace {
         self.vertical_tabs_panel.show_settings_popup = false;
     }
 
-    /// Sets the visibility state of the agent management view
-    /// and updates the AgentConversationsModel to reflect the new state.
-    fn set_is_agent_management_view_open(&mut self, is_open: bool, ctx: &mut ViewContext<Self>) {
-        let was_open = self.current_workspace_state.is_agent_management_view_open;
-        if was_open == is_open {
-            return;
-        }
-        self.current_workspace_state.is_agent_management_view_open = is_open;
-        let window_id = self.window_id;
-        let view_id = self.agent_management_view.id();
-        AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
-            if is_open {
-                model.register_view_open(window_id, view_id, ctx);
-            } else {
-                model.register_view_closed(window_id, view_id, ctx);
-            }
-        });
-
-        // Notify panels about the agent management view state change so they can
-        // update their top border visibility accordingly.
-        self.left_panel_view.update(ctx, |panel, ctx| {
-            panel.set_agent_management_view_open(is_open, ctx);
-        });
-        self.right_panel_view.update(ctx, |panel, ctx| {
-            panel.set_agent_management_view_open(is_open, ctx);
-        });
-    }
+    /// Stub: agent management view removed (BYOP).
+    fn set_is_agent_management_view_open(&mut self, _is_open: bool, _ctx: &mut ViewContext<Self>) {}
 
     fn toggle_left_panel(&mut self, ctx: &mut ViewContext<Self>) {
         let active_pane_group = self.active_tab_pane_group().clone();
@@ -9732,11 +9513,6 @@ impl Workspace {
                 .unwrap_or(DEFAULT_RIGHT_PANEL_WIDTH)
         });
 
-        let agent_management_filters = Some(
-            self.agent_management_view
-                .read(app, |view, _| view.get_filters()),
-        );
-
         WindowSnapshot {
             tabs,
             active_tab_index,
@@ -9751,7 +9527,7 @@ impl Workspace {
             vertical_tabs_panel_open: self.vertical_tabs_panel_open,
             left_panel_width,
             right_panel_width,
-            agent_management_filters,
+            agent_management_filters: None,
         }
     }
 
@@ -16157,35 +15933,10 @@ impl Workspace {
 
     fn render_agent_management_view_button(
         &self,
-        appearance: &Appearance,
-        ctx: &AppContext,
+        _appearance: &Appearance,
+        _ctx: &AppContext,
     ) -> Box<dyn Element> {
-        let is_active = self.current_workspace_state.is_agent_management_view_open;
-
-        SavePosition::new(
-            Container::new(
-                Align::new(
-                    self.render_tab_bar_icon_button(
-                        appearance,
-                        icons::Icon::Grid,
-                        &self.mouse_states.agent_management_view_button,
-                        WorkspaceAction::ToggleAgentManagementView,
-                        crate::t!("workspace-agent-management-panel-tooltip"),
-                        keybinding_name_to_display_string(
-                            "workspace:toggle_agent_management_view",
-                            ctx,
-                        ),
-                        is_active,
-                        false,
-                    )
-                    .finish(),
-                )
-                .finish(),
-            )
-            .finish(),
-            "workspace:toggle_agent_management_view",
-        )
-        .finish()
+        warpui::elements::Empty::new().finish()
     }
 
     fn render_left_toggle_button(
@@ -16956,9 +16707,7 @@ impl Workspace {
             )
             .finish();
 
-        let unread_count = AgentNotificationsModel::as_ref(ctx)
-            .notifications()
-            .filtered_count(NotificationFilter::Unread);
+        let unread_count: usize = 0;
         let mailbox_element = if unread_count > 0 {
             let indicator = Container::new(
                 ConstrainedBox::new(
@@ -17768,13 +17517,7 @@ impl Workspace {
     ) -> Box<dyn Element> {
         let active_tab_data = &self.tabs[self.active_tab_index];
 
-        let active_content = if FeatureFlag::AgentManagementView.is_enabled()
-            && self.current_workspace_state.is_agent_management_view_open
-        {
-            ChildView::new(&self.agent_management_view).finish()
-        } else {
-            ChildView::new(&active_tab_data.pane_group).finish()
-        };
+        let active_content = ChildView::new(&active_tab_data.pane_group).finish();
 
         let terminal_content = match self.maybe_render_workspace_banner(app, appearance) {
             Some(banner_element) => Flex::column()
@@ -19860,33 +19603,7 @@ impl TypedActionView for Workspace {
             ToggleVerticalTabsPanel => {
                 self.toggle_vertical_tabs_panel(ctx);
             }
-            ToggleNotificationMailbox { select_first } => {
-                if FeatureFlag::HOANotifications.is_enabled()
-                    && *AISettings::as_ref(ctx).show_agent_notifications
-                {
-                    let opening = !self.current_workspace_state.is_notification_mailbox_open;
-                    self.current_workspace_state.is_notification_mailbox_open = opening;
-                    if let Some(stack) = &self.notification_toast_stack {
-                        stack.update(ctx, |stack, ctx| stack.set_mailbox_open(opening, ctx));
-                    }
-                    if opening {
-                        if self.tab_bar_mode(ctx).has_tab_bar() {
-                            self.tab_bar_pinned_by_popup = true;
-                        }
-                        if let Some(view) = &self.notification_mailbox_view {
-                            view.update(ctx, |mailbox, ctx| {
-                                mailbox.reset_for_open(*select_first, ctx);
-                            });
-                            ctx.focus(view);
-                        }
-                    } else {
-                        self.tab_bar_pinned_by_popup = false;
-                        self.sync_window_button_visibility(ctx);
-                        self.focus_active_tab(ctx);
-                    }
-                    ctx.notify();
-                }
-            }
+            ToggleNotificationMailbox { select_first: _ } => {}
             ToggleVerticalTabsSettingsPopup => {
                 if FeatureFlag::VerticalTabs.is_enabled()
                     && *TabSettings::as_ref(ctx).use_vertical_tabs
@@ -20017,41 +19734,8 @@ impl TypedActionView for Workspace {
                 ctx.notify();
             }
             ToggleAgentManagementView => {
-                if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
-                    && FeatureFlag::AgentManagementView.is_enabled()
-                {
-                    let is_open = !self.current_workspace_state.is_agent_management_view_open;
-                    self.set_is_agent_management_view_open(is_open, ctx);
-
-                    send_telemetry_from_ctx!(
-                        AgentManagementTelemetryEvent::ViewToggled { is_open },
-                        ctx
-                    );
-
-                    if is_open {
-                        ctx.focus(&self.agent_management_view);
-                    } else {
-                        self.focus_active_tab(ctx);
-                    }
-
-                    ctx.notify();
-                }
             }
-            ViewAgentRunsForEnvironment { environment_id } => {
-                if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
-                    && FeatureFlag::AgentManagementView.is_enabled()
-                {
-                    self.set_is_agent_management_view_open(true, ctx);
-                    ctx.focus(&self.agent_management_view);
-
-                    let environment_id = environment_id.clone();
-                    self.agent_management_view.update(ctx, |view, ctx| {
-                        view.apply_environment_filter_from_link(environment_id, ctx);
-                    });
-
-                    ctx.notify();
-                }
-            }
+            ViewAgentRunsForEnvironment { environment_id: _ } => {}
             ClosePanel => {
                 if self.left_panel_view.is_self_or_child_focused(ctx) {
                     self.close_left_panel(ctx);
@@ -20092,18 +19776,7 @@ impl TypedActionView for Workspace {
 
                 self.add_terminal_pane_in_ai_mode(*zero_state_prompt_suggestion_type, ctx);
             }
-            OpenCloudAgentSetupGuide => {
-                if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
-                    && FeatureFlag::AgentManagementView.is_enabled()
-                {
-                    self.set_is_agent_management_view_open(true, ctx);
-                    ctx.focus(&self.agent_management_view);
-                    self.agent_management_view.update(ctx, |view, ctx| {
-                        view.show_setup_guide_from_link(ctx);
-                    });
-                    ctx.notify();
-                }
-            }
+            OpenCloudAgentSetupGuide => {}
             ToggleAIAssistant => {
                 self.toggle_ai_assistant_panel(ctx);
                 send_telemetry_from_ctx!(
@@ -20521,21 +20194,7 @@ impl TypedActionView for Workspace {
                 );
             }
             JumpToLatestToast => {
-                if FeatureFlag::HOANotifications.is_enabled() {
-                    let newest = AgentNotificationsModel::as_ref(ctx)
-                        .notifications()
-                        .items_filtered(NotificationFilter::Unread)
-                        .next()
-                        .map(|item| (item.id, item.terminal_view_id));
-                    if let Some((id, terminal_view_id)) = newest {
-                        AgentNotificationsModel::handle(ctx).update(ctx, |model, ctx| {
-                            model.mark_item_read(id, ctx);
-                        });
-                        self.handle_action(
-                            &WorkspaceAction::FocusTerminalViewInWorkspace { terminal_view_id },
-                            ctx,
-                        );
-                    }
+                if false {
                 } else if let Some((window_id, tab_index, terminal_view_id)) = self
                     .agent_toast_stack
                     .as_ref(ctx)
@@ -21128,32 +20787,6 @@ impl TypedActionView for Workspace {
                 conversation_id,
                 terminal_view_id,
             } => {
-                // Exit agent view first if this conversation is currently expanded.
-                // This must happen before updating BlocklistAIHistoryModel to avoid
-                // circular model references.
-                if let Some(controller) = ActiveAgentViewsModel::as_ref(ctx)
-                    .get_controller_for_conversation(*conversation_id, ctx)
-                {
-                    let succesfully_exited_agent_view =
-                        controller.update(ctx, |controller, ctx| {
-                            controller.exit_agent_view(ctx);
-                            !controller.is_active()
-                        });
-
-                    if !succesfully_exited_agent_view {
-                        ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                            toast_stack.add_ephemeral_toast(
-                                DismissibleToast::error(
-                                    "Failed to delete conversation. Please exit the agent view and try again.".to_string(),
-                                ),
-                                window_id,
-                                ctx,
-                            );
-                        });
-                        return;
-                    }
-                }
-
                 conversation_utils::delete_conversation(*conversation_id, *terminal_view_id, ctx);
 
                 send_telemetry_from_ctx!(TelemetryEvent::ConversationListItemDeleted, ctx);
@@ -22279,28 +21912,6 @@ impl View for Workspace {
             );
         }
 
-        if self.current_workspace_state.is_notification_mailbox_open {
-            if let Some(view) = &self.notification_mailbox_view {
-                let mailbox_on_left = Self::is_mailbox_on_left(
-                    &TabSettings::as_ref(app).header_toolbar_chip_selection,
-                );
-                let (anchor, child_anchor) = if mailbox_on_left {
-                    (PositionedElementAnchor::BottomLeft, ChildAnchor::TopLeft)
-                } else {
-                    (PositionedElementAnchor::BottomRight, ChildAnchor::TopRight)
-                };
-                stack.add_positioned_overlay_child(
-                    ChildView::new(view).finish(),
-                    OffsetPositioning::offset_from_save_position_element(
-                        NOTIFICATIONS_MAILBOX_POSITION_ID,
-                        Vector2F::zero(),
-                        PositionedElementOffsetBounds::WindowByPosition,
-                        anchor,
-                        child_anchor,
-                    ),
-                );
-            }
-        }
 
         if !FeatureFlag::AgentMode.is_enabled()
             && AISettings::as_ref(app).is_any_ai_enabled(app)
@@ -22386,40 +21997,7 @@ impl View for Workspace {
         );
 
         // Render agent toast stack (for agent-related notifications) if popup is not open
-        if FeatureFlag::HOANotifications.is_enabled()
-            && *AISettings::as_ref(app).show_agent_notifications
-        {
-            if !self.current_workspace_state.is_notification_mailbox_open {
-                if let Some(stack_view) = &self.notification_toast_stack {
-                    let mailbox_on_left = Self::is_mailbox_on_left(
-                        &TabSettings::as_ref(app).header_toolbar_chip_selection,
-                    );
-                    let (anchor, child_anchor, offset_x) = if mailbox_on_left {
-                        (
-                            PositionedElementAnchor::BottomLeft,
-                            ChildAnchor::TopLeft,
-                            WORKSPACE_PADDING,
-                        )
-                    } else {
-                        (
-                            PositionedElementAnchor::BottomRight,
-                            ChildAnchor::TopRight,
-                            -WORKSPACE_PADDING,
-                        )
-                    };
-                    stack.add_positioned_overlay_child(
-                        ChildView::new(stack_view).finish(),
-                        OffsetPositioning::offset_from_save_position_element(
-                            TAB_BAR_POSITION_ID,
-                            vec2f(offset_x, 4.),
-                            PositionedElementOffsetBounds::WindowByPosition,
-                            anchor,
-                            child_anchor,
-                        ),
-                    );
-                }
-            }
-        } else if !self.current_workspace_state.is_agent_management_popup_open {
+        if !self.current_workspace_state.is_agent_management_popup_open {
             stack.add_positioned_overlay_child(
                 ChildView::new(&self.agent_toast_stack).finish(),
                 self.agent_toast_positioning(),

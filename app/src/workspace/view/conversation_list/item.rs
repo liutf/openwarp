@@ -1,6 +1,5 @@
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
-use crate::ai::active_agent_views_model::ConversationOrTaskId;
 use crate::ai::agent_conversations_model::ConversationOrTask;
+use crate::workspace::view::conversation_list::view_model::ConversationOrTaskId;
 use crate::ai::conversation_status_ui::{render_status_element, STATUS_ELEMENT_PADDING};
 use crate::appearance::Appearance;
 use crate::menu::Menu;
@@ -396,13 +395,7 @@ fn format_item_subtext(conversation: &ConversationOrTask, app: &AppContext) -> O
             task.source.as_ref().map(|s| s.display_name().to_string())
         }
         ConversationOrTask::Conversation(metadata) => {
-            // If this conversation is active (with an expanded agent view),
-            // we use the terminal session's live working directory.
-            let live_pwd = ActiveAgentViewsModel::as_ref(app)
-                .get_active_session_for_conversation(metadata.nav_data.id, app)
-                .and_then(|session| session.as_ref(app).current_working_directory().cloned());
-
-            let pwd = live_pwd.or_else(|| metadata.nav_data.initial_working_directory.clone());
+            let pwd = metadata.nav_data.initial_working_directory.clone();
             pwd.map(|pwd| {
                 let home_dir = dirs::home_dir().and_then(|p| p.to_str().map(String::from));
                 user_friendly_path(&pwd, home_dir.as_deref()).into_owned()
