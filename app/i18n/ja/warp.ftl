@@ -2697,7 +2697,6 @@ drive-trash-menu = ゴミ箱
 drive-open = 開く
 drive-edit = 編集
 drive-restore = 復元
-drive-restore = 復元
 drive-compare-plans = プランを比較
 drive-manage-billing = 請求情報を管理
 drive-object-type-notebook-plural = ノートブック
