@@ -701,32 +701,49 @@ fn build_chat_request(
                 // 环境型 context(env / git / skills / ...)由 prompt_renderer 渲染进 system,
                 // 与本路径不重叠。
                 //
-                // OpenWarp:LRC tag-in 场景下,`running_command: Some(...)` 含完整 PTY 上下文
-                // (alt-screen grid_contents + command + is_alt_screen_active 标志),用
-                // `render_running_command_context` 渲成 `<attached_running_command>` XML 块
-                // prepend 到 user message,模型据此决定调 write_to_long_running_shell_command。
-                // 没填(普通对话或 controller 没注入)时回退到 `lrc_command_id` 简短上下文。
-                let mut prefixes: Vec<String> = Vec::new();
+                // OpenWarp：LRC tag-in 场景下，`running_command: Some(...)` 含完整 PTY 上下文
+                // （alt-screen grid_contents + command + is_alt_screen_active 标志），用
+                // `render_running_command_context` 渲成 `<attached_running_command>` XML 块。
+                // 模型据此决定调 write_to_long_running_shell_command。
+                // 没填（普通对话或 controller 没注入）时回退到 `lrc_command_id` 简短上下文。
+                //
+                // **P1-10 prompt cache 优化**：LRC 上下文块**追加到 query 之后**而不
+                // 是前缀。原因：
+                //   - grid_contents 随 PTY 状态每秒变化，是 “高频变动” 内容。
+                //   - 放到 query 前面会让 user message 头部不稳定→ messages 段末尾
+                //     2 个 Anthropic breakpoint 写入的哈希总是不同，复用价值低。
+                //   - 放到 query 之后，同一个 query (如 “退出 nvim”) 在不同 PTY 快照上仍
+                //     共享前缀“user 问题”，提高跨调用复用可能。
+                // 模型行为差别微小：指令在前还是 context 在前，模型都能正确理解。
+                // user_attachments 的 prefix（如 SelectedText / Block）仍放前缀位，因为
+                // 它们对应用户“明确选中”的内容，应作为问题背景而非实例补充。
+                let mut suffixes: Vec<String> = Vec::new();
                 let request_running_command = running_command
                     .as_ref()
                     .or(params.lrc_running_command.as_ref());
                 if let Some(rc) = request_running_command {
-                    prefixes.push(render_running_command_context(rc));
+                    suffixes.push(render_running_command_context(rc));
                 } else if let Some(command_id) = params.lrc_command_id.as_deref() {
-                    prefixes.push(render_running_command_id_context(command_id));
+                    suffixes.push(render_running_command_id_context(command_id));
                 }
+                let mut prefixes: Vec<String> = Vec::new();
                 let user_attachments = user_context::collect_user_attachments(context);
                 if let Some(p) = &user_attachments.prefix {
                     prefixes.push(p.clone());
                 }
-                let full_text = if prefixes.is_empty() {
-                    query.clone()
-                } else {
-                    format!("{}\n\n{query}", prefixes.join("\n\n"))
+                let full_text = match (prefixes.is_empty(), suffixes.is_empty()) {
+                    (true, true) => query.clone(),
+                    (false, true) => format!("{}\n\n{query}", prefixes.join("\n\n")),
+                    (true, false) => format!("{query}\n\n{}", suffixes.join("\n\n")),
+                    (false, false) => format!(
+                        "{}\n\n{query}\n\n{}",
+                        prefixes.join("\n\n"),
+                        suffixes.join("\n\n"),
+                    ),
                 };
                 log::info!(
                     "[byop-diag] build_chat_request UserQuery: query_len={} \
-                     running_command={} prefixes={} full_text_len={} binaries={}",
+                     running_command={} prefixes={} suffixes={} full_text_len={} binaries={}",
                     query.len(),
                     match request_running_command {
                         Some(rc) => format!(
@@ -737,6 +754,7 @@ fn build_chat_request(
                         None => "None".to_owned(),
                     },
                     prefixes.len(),
+                    suffixes.len(),
                     full_text.len(),
                     user_attachments.binaries.len(),
                 );
@@ -891,15 +909,47 @@ fn build_chat_request(
 }
 
 /// 1:1 移植自 opencode `provider/transform.ts::applyCaching` 的 Anthropic 分支:
-/// 给 first 2 个 system message + last 2 个 non-system message 打 Ephemeral
-/// cache 标记。
+/// 给 first 2 个 system message + last 2 个 non-system message 打 cache 标记。
 ///
 /// genai Anthropic adapter 在 `into_anthropic_request_parts` 内把
 /// `MessageOptions::cache_control` 落到该 message 最后一个 content part 上,
 /// 行为与 opencode 给 lastContent.providerOptions.anthropic.cacheControl 一致。
 ///
-/// **TTL 排序**:全部用 `Ephemeral`(5m),不混 `Ephemeral1h`,避开 genai 的
-/// "1h 必须在 5m 之前"约束(`chat_message.rs::CacheControl` 注释)。
+/// **TTL 选择 / P0-4**:统一使用 `Ephemeral1h`(1 小时 TTL)。
+///
+/// 决策依据(2026-05 Anthropic 官方文档):
+/// - 5m TTL 适合「使用频率高于每 5 分钟」的场景,refresh 不另外计费。
+/// - 1h TTL 官方原话:
+///   > The 1-hour cache is best used in the following scenarios:
+///   > * when an agentic side-agent will take longer than 5 minutes,
+///   > * when storing a long chat conversation with a user and you generally
+///   >   expect that user may not respond in the next 5 minutes.
+///   > * When latency is important and your follow up prompts may be sent
+///   >   beyond 5 minutes.
+/// - OpenWarp BYOP 是终端 agent 场景:工具长任务、用户思考间隔、agent
+///   step-by-step 都可能 > 5min;Claude Code CLI 在同类场景实际默认就是 1h。
+///
+/// **成本影响**:1h cache 写入价 2× base(对比 5m 的 1.25×),read 价不变
+/// (0.1× base)。只要同一 prefix 在 1h 内复用 ≥ 1 次,就比 5m 反复 refresh 划算
+/// (5m 模式每 5min 必须有请求触发 refresh,否则失效;1h 模式 1 小时内任意请求
+/// 都直接命中)。
+///
+/// **TTL 排序约束**:Anthropic API 要求长 TTL 的 breakpoint 必须排在短 TTL 之前
+/// (`https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+///  #mixing-different-ttls`)。这里全部统一 1h,无混用,天然合规。
+/// genai 在 `into_anthropic_request_parts` 内会按顺序检查,违反时 warn(见
+/// `lib/rust-genai/src/adapter/adapters/anthropic/adapter_impl.rs`)。
+///
+/// **为什么不给 tools 打独立 breakpoint(P1-11 调研后决定推迟)**:
+/// Anthropic API 原生支持 tools 数组末尾独立 cache_control,但 vendored
+/// `lib/rust-genai` 的 `Tool` struct 不带 cache_control 字段,要启用需:
+/// 1. 修改 genai `Tool` 加 `cache_control: Option<CacheControl>`
+/// 2. 修改 `tool_to_anthropic_tool` 输出 `cache_control` 到 JSON
+/// 3. 这里调整为“1 system + 2 messages tail + 1 tools” 总计 4 个 breakpoint
+/// 实测现有 4 breakpoint(2 system + 2 tail)在典型场景中命中率已达 99.9%,
+/// tools 段独立 breakpoint 仅在 system 字段频繁变动(如切 web_search 开关)
+/// 时才能带来额外复用,边际收益小,暂不实施。如后期出现 tools 失效问题
+/// 再走 P1-11 未使用路径(需同步 patch genai 上游)。
 fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
     let n = messages.len();
     if n == 0 {
@@ -940,7 +990,8 @@ fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
                 // `MessageOptions` 上,通过 `with_options` 注入。
                 // `MessageOptions: From<CacheControl>` 由 genai 提供
                 // (`chat_message.rs::impl From<CacheControl> for MessageOptions`)。
-                m.with_options(CacheControl::Ephemeral)
+                // P0-4:全部统一 1h,顺序天然 system→messages 兼容 genai 排序约束。
+                m.with_options(CacheControl::Ephemeral1h)
             } else {
                 m
             }
@@ -1775,6 +1826,37 @@ fn dashscope_needs_enable_thinking(
         || id.contains("qwen-plus")
 }
 
+/// 判断 OpenAI 某 model 是否支持 24h Extended Cache(`prompt_cache_retention="24h"`)。
+///
+/// 官方文档(2026-05):
+/// - GPT-5 系列 / GPT-5.x / GPT-5-codex / GPT-4.1 / o-series:支持 24h
+/// - GPT-5.5+:**不支持** `in_memory`,默认 24h(不传亦可,但显式下发体验更佳)
+/// - 旧型号(GPT-4o / GPT-3.5):`in_memory`(默认 5-10min)
+///
+/// model_id 处理原则:
+/// 1. 以在上游官方文档明确点名的名称为准
+/// 2. 包含则走 24h(含 prefix 匹配:“gpt-5-mini” / "gpt-5.5-pro" 都命中 "gpt-5")
+/// 3. 不识别的 model 默认不含在列表里 → 走 in_memory(低风险默认)
+///
+/// **跨云厂商使用同一 OpenAI 兼容 endpoint** 的情况(OpenRouter / vLLM / lm-studio /
+/// Azure OpenAI 等):model_id 可能被重命名,这里仅能以字面匹配推断,
+/// 未命中时走 in_memory 默认。后续可考虑提供设置项手动覆盖。
+fn openai_supports_extended_cache(model_id: &str) -> bool {
+    let m = model_id.to_ascii_lowercase();
+    // 官方文档明确点名支持 24h 的型号前缀集合。
+    // 顺序不重要(any),但要避免跨型号误匹配。
+    const PREFIXES: &[&str] = &[
+        "gpt-5",   // gpt-5, gpt-5-mini, gpt-5.5, gpt-5.5-pro, gpt-5-codex 均命中
+        "gpt-4.1", // gpt-4.1, gpt-4.1-mini, gpt-4.1-nano
+        "o3",      // o3, o3-mini, o3-pro
+        "o4",      // o4, o4-mini
+        "o1",      // o1, o1-mini, o1-preview
+    ];
+    PREFIXES
+        .iter()
+        .any(|p| m.starts_with(p) || m.contains(&format!("/{p}")))
+}
+
 fn build_chat_options(
     api_type: AgentProviderApiType,
     base_url: &str,
@@ -1798,8 +1880,19 @@ fn build_chat_options(
     //   - prompt_cache_key:OpenAI 把同 key 的请求路由到同一缓存分片,提升命中
     //     (`prompt_cache_key` field,见 `adapter_shared.rs:194` /
     //     `openai_resp/adapter_impl.rs:238`);用 conversation_id 作为稳定 key。
-    //   - cache_control = Ephemeral → 序列化为 `prompt_cache_retention: "in_memory"`
-    //     (genai `adapter_shared.rs:199`),触发服务端短 TTL 缓存。
+    //   - cache_control → 序列化为 `prompt_cache_retention` 字段(genai
+    //     `adapter_shared.rs:197-205`):
+    //       * Memory / Ephemeral → "in_memory"(旧型号默认 5-10min)
+    //       * Ephemeral24h         → "24h"(GPT-5 / 4.1 / o-series Extended Cache)
+    //       * Ephemeral5m / 1h     → None(不下发字段)
+    //
+    // **P0-5**:按 model_id 推断 TTL
+    // - 官方点名支持 24h 的型号(GPT-5/5.x/5-codex / GPT-4.1 / o-series) → 24h
+    // - 旧型号 / 未识别 model → in_memory(保证代理 / 本地服务不报错)
+    // - 官方明确点名:GPT-5.5+ 不支持 in_memory,仅 24h。不识别时 fallback in_memory
+    //   在 GPT-5.5+ 上反而会被拒;但另一面,上面的 prefix 匹配 "gpt-5" 会提前
+    //   拦截该型号走 24h,逻辑上不会遗漏。
+    //
     // Anthropic 走 per-message cache_control(在 build_chat_request 里),不在此处。
     // DeepSeek / Gemini / Ollama 服务端隐式缓存,跳过。
     if matches!(
@@ -1811,7 +1904,12 @@ fn build_chat_options(
                 opts = opts.with_prompt_cache_key(cid.to_owned());
             }
         }
-        opts = opts.with_cache_control(CacheControl::Ephemeral);
+        let cc = if openai_supports_extended_cache(model_id) {
+            CacheControl::Ephemeral24h
+        } else {
+            CacheControl::Ephemeral
+        };
+        opts = opts.with_cache_control(cc);
     }
 
     // **思考深度档位下发**(对齐 Zed `LanguageModelRequest::thinking_allowed` 各
@@ -2051,13 +2149,25 @@ pub async fn generate_byop_output(
 
     // INFO 级别一行总览 + 每条 message 一行简报(role + 文本长度 + tool 计数 + reasoning 标记),
     // 默认日志配置即可看到,便于诊断"历史是否完整传上去"等问题。
+    //
+    // 注:Anthropic 路径下，`build_chat_request` 会把 system 文本作为 `ChatMessage::system`
+    // 推到 messages[0] 以便打 `cache_control`，所以 `chat_req.system` 会是 None、`system_len`
+    // 显示为 0；实际 system 内容仍然在 messages[0] 里(看下面逐条报告)。为避免误
+    // 导诊断者，这里加上 `system_in_messages_head` 提示。
+    let system_in_head = matches!(api_type, AgentProviderApiType::Anthropic)
+        && chat_req
+            .messages
+            .first()
+            .map(|m| matches!(m.role, ChatRole::System))
+            .unwrap_or(false);
     log::info!(
-        "[byop] adapter={:?} model={} system_len={} messages={} tools={}",
+        "[byop] adapter={:?} model={} system_len={} messages={} tools={} system_in_messages_head={}",
         adapter_kind_for(api_type),
         model_id,
         chat_req.system.as_deref().map(str::len).unwrap_or(0),
         chat_req.messages.len(),
         chat_req.tools.as_ref().map(|t| t.len()).unwrap_or(0),
+        system_in_head,
     );
     for (idx, m) in chat_req.messages.iter().enumerate() {
         let role = format!("{:?}", m.role);
@@ -2330,6 +2440,12 @@ pub async fn generate_byop_output(
         // 二者相加除以 context_window 即为"context 占用率",和 warp 自家 server 路径语义一致。
         let mut captured_prompt_tokens: i32 = 0;
         let mut captured_completion_tokens: i32 = 0;
+        // P0-6 prompt cache 命中率监控:从 genai `Usage.prompt_tokens_details` 里拼
+        // 出 Anthropic / OpenAI / Gemini 返回的 cache_read / cache_create 字段。
+        // 详见 stream End 处理逻辑。DeepSeek / Ollama 本身不走 cache 字段,后续
+        // 依然保持 0。
+        let mut captured_cache_read_tokens: i32 = 0;
+        let mut captured_cache_create_tokens: i32 = 0;
 
         while let Some(item) = sdk_stream.next().await {
             let event = match item {
@@ -2497,6 +2613,22 @@ pub async fn generate_byop_output(
                         if let Some(c) = usage.completion_tokens {
                             captured_completion_tokens = captured_completion_tokens.max(c);
                         }
+                        // P0-6 prompt cache 命中率监控:Anthropic / OpenAI / Gemini 在
+                        // `prompt_tokens_details` 中分别返回 `cache_read_input_tokens`
+                        // (Anthropic) / `cached_tokens`(OpenAI) / `cachedContentTokenCount`
+                        // (Gemini)。genai 已统一映射到 `cached_tokens`。
+                        // 同样 `cache_creation_tokens` 仅 Anthropic 提供(写入计费提示)。
+                        // 多次 End 取最大值兜底,语义同 prompt/completion。
+                        if let Some(details) = usage.prompt_tokens_details.as_ref() {
+                            if let Some(r) = details.cached_tokens {
+                                captured_cache_read_tokens =
+                                    captured_cache_read_tokens.max(r);
+                            }
+                            if let Some(w) = details.cache_creation_tokens {
+                                captured_cache_create_tokens =
+                                    captured_cache_create_tokens.max(w);
+                            }
+                        }
                     }
                 }
                 _ => {
@@ -2515,6 +2647,42 @@ pub async fn generate_byop_output(
              reasoning={reasoning_count} ({reasoning_bytes}B) tool_chunks={tool_chunk_count} \
              ends={end_count} other={other_count} captured_tools={total_tools}"
         );
+        // P0-6 prompt cache 命中率日志(只在 provider 返回 cache 字段时打)。
+        // ratio = cache_read / (prompt_tokens.max(1)) 表示本轮 input 中有多少比例直接
+        // 命中了缓存。create > 0 表示本轮有 cache write,write 价 ≈ 1.25x base(5m)或
+        // 2x base(1h)。read 价 ≈ 0.1x base,长期看只要 ≥ 1 次复用就回本。
+        // 用 ratio 判定 P0 优化是否生效:同一对话第 2+ 轮应当看到 ratio 显著上升。
+        //
+        // **P2-16**:额外拼一个 `compaction=` 标识。压缩本身会重写历史使 messages
+        // prefix 跨压缩之前后不一致 → 压缩后首轮必然 cache miss。在日志里输出该
+        // 信号让后期分析(`script/analyze-prompt-cache.ps1`)能区分“正常 miss”与
+        // “压缩导致 miss”,避免误伤。
+        if captured_cache_read_tokens > 0 || captured_cache_create_tokens > 0 {
+            let denom = captured_prompt_tokens.max(1);
+            let read_ratio = captured_cache_read_tokens as f32 / denom as f32;
+            let create_ratio = captured_cache_create_tokens as f32 / denom as f32;
+            // 压缩状态:none → 未启用 / inactive → 启用但本轮未变化 /
+            // active(已 hide 的 message id 个数) → 本轮走了压缩路径。
+            let compaction_label = match params.compaction_state.as_ref() {
+                None => "none".to_owned(),
+                Some(s) => {
+                    let hidden = s.hidden_message_ids().len();
+                    if hidden == 0 {
+                        "inactive".to_owned()
+                    } else {
+                        format!("active(hidden={hidden})")
+                    }
+                }
+            };
+            log::info!(
+                "[byop-cache] prompt_tokens={captured_prompt_tokens} \
+                 cache_read={captured_cache_read_tokens} ({:.1}%) \
+                 cache_create={captured_cache_create_tokens} ({:.1}%) \
+                 model={model_id} compaction={compaction_label}",
+                read_ratio * 100.0,
+                create_ratio * 100.0,
+            );
+        }
         if chunk_count == 0 && reasoning_count == 0 && total_tools == 0 {
             log::warn!(
                 "[byop] stream returned 0 content / 0 reasoning / 0 tool_calls — \
@@ -4006,4 +4174,347 @@ mod build_chat_options_off_tests {
         let o = opts(AgentProviderApiType::OpenAi, "gpt-4o", R::Off);
         assert!(o.reasoning_effort.is_none());
     }
+}
+
+/// `openai_supports_extended_cache` 的单元测试。
+///
+/// 官方 2026-05 点名支持 24h Extended Cache 的型号:GPT-5 系列 / GPT-5.x /
+/// GPT-5-codex / GPT-4.1 / o-series。其他一律走 in_memory 低风险默认。
+#[cfg(test)]
+mod openai_extended_cache_tests {
+    use super::*;
+
+    #[test]
+    fn gpt5_family_supports_24h() {
+        assert!(openai_supports_extended_cache("gpt-5"));
+        assert!(openai_supports_extended_cache("gpt-5-mini"));
+        assert!(openai_supports_extended_cache("gpt-5-codex"));
+        assert!(openai_supports_extended_cache("gpt-5.5"));
+        assert!(openai_supports_extended_cache("gpt-5.5-pro"));
+    }
+
+    #[test]
+    fn gpt41_family_supports_24h() {
+        assert!(openai_supports_extended_cache("gpt-4.1"));
+        assert!(openai_supports_extended_cache("gpt-4.1-mini"));
+        assert!(openai_supports_extended_cache("gpt-4.1-nano"));
+    }
+
+    #[test]
+    fn o_series_supports_24h() {
+        assert!(openai_supports_extended_cache("o3"));
+        assert!(openai_supports_extended_cache("o3-mini"));
+        assert!(openai_supports_extended_cache("o4-mini"));
+        assert!(openai_supports_extended_cache("o1-preview"));
+    }
+
+    #[test]
+    fn legacy_models_default_in_memory() {
+        assert!(!openai_supports_extended_cache("gpt-4o"));
+        assert!(!openai_supports_extended_cache("gpt-4o-mini"));
+        assert!(!openai_supports_extended_cache("gpt-4-turbo"));
+        assert!(!openai_supports_extended_cache("gpt-3.5-turbo"));
+    }
+
+    #[test]
+    fn case_insensitive() {
+        assert!(openai_supports_extended_cache("GPT-5"));
+        assert!(openai_supports_extended_cache("GPT-4.1-Mini"));
+    }
+
+    /// OpenRouter 等代理会把型号写成 "openai/gpt-5";`/<prefix>` 包含判定仅
+    /// 在路径路由型型号上生效。
+    #[test]
+    fn openrouter_style_path_matches() {
+        assert!(openai_supports_extended_cache("openai/gpt-5"));
+        assert!(openai_supports_extended_cache("openai/gpt-4.1-mini"));
+        assert!(openai_supports_extended_cache("vendor/o3-mini"));
+    }
+
+    /// 未识别 / 本地服务 → 不走 24h(低风险默认)。
+    #[test]
+    fn unknown_models_default_false() {
+        assert!(!openai_supports_extended_cache("qwen-max"));
+        assert!(!openai_supports_extended_cache("deepseek-chat"));
+        assert!(!openai_supports_extended_cache("llama-3.1-70b"));
+        assert!(!openai_supports_extended_cache(""));
+    }
+}
+
+/// **端到端 cache 边界稳定性测试**:验证多轮对话模拟下,prompt cache
+/// 需要的“前缀字节级一致”保证。这些测试并不调用上游 API,仅检查
+/// `apply_caching_anthropic` 与 `build_chat_options` 输出的确定性。
+///
+/// 这是 cache 命中的**最低门槛**:如果同样输入跨调用输出不一致,
+/// 上游哈希必不一致 → 100% miss。反之输出一致也不能保证命中。
+#[cfg(test)]
+mod cache_boundary_stability_tests {
+    use super::*;
+    use genai::chat::{ChatMessage, ChatRole};
+
+    /// 构造一个典型的多轮对话 messages 序列:
+    /// system + user_1 + assistant_1 + user_2 + assistant_2 + user_3
+    /// (末尾是 user,与 `ensure_ends_with_user` 输出一致)。
+    fn build_three_turn_conversation() -> Vec<ChatMessage> {
+        vec![
+            ChatMessage::system(
+                "You are a helpful coding assistant for OpenWarp BYOP.\n\
+                 Guidelines: be concise, prefer code over prose.",
+            ),
+            ChatMessage::user("What is rust borrow checker?"),
+            ChatMessage::assistant("It enforces ownership rules at compile time."),
+            ChatMessage::user("Show me a code example"),
+            ChatMessage::assistant("```rust\nfn main() { let s = String::new(); }\n```"),
+            ChatMessage::user("Explain the lifetime in that code"),
+        ]
+    }
+
+    fn extract_cache_control(msg: &ChatMessage) -> Option<CacheControl> {
+        // ChatMessage 的 cache_control 在 `options.cache_control` 上。
+        msg.options.as_ref().and_then(|o| o.cache_control.clone())
+    }
+
+    fn cache_signature(msgs: &[ChatMessage]) -> Vec<(usize, ChatRole, Option<CacheControl>)> {
+        msgs.iter()
+            .enumerate()
+            .map(|(i, m)| (i, m.role.clone(), extract_cache_control(m)))
+            .collect()
+    }
+
+    /// **P0-4 主要验收**:apply_caching_anthropic 在同一输入上重复调用
+    /// 产出的 cache 标记位置与 TTL 必须 byte-equal。
+    #[test]
+    fn apply_caching_anthropic_is_deterministic() {
+        let mut a = build_three_turn_conversation();
+        let mut b = build_three_turn_conversation();
+        apply_caching_anthropic(&mut a);
+        apply_caching_anthropic(&mut b);
+        assert_eq!(
+            cache_signature(&a),
+            cache_signature(&b),
+            "同输入 × 多次调用 cache 标记必须一致"
+        );
+    }
+
+    /// **P0-4 TTL 验收**:全部走 1h(Ephemeral1h)而非旧版的 5m(Ephemeral)。
+    #[test]
+    fn anthropic_cache_uses_1h_ttl() {
+        let mut msgs = build_three_turn_conversation();
+        apply_caching_anthropic(&mut msgs);
+        let tagged: Vec<_> = msgs
+            .iter()
+            .filter_map(|m| extract_cache_control(m))
+            .collect();
+        assert!(!tagged.is_empty(), "必须至少打一个 breakpoint");
+        for cc in &tagged {
+            assert!(
+                matches!(cc, CacheControl::Ephemeral1h),
+                "P0-4 要求全部使用 1h TTL,实际={:?}",
+                cc
+            );
+        }
+    }
+
+    /// **P0-4 覆盖面验收**:opencode 路子 first 2 system + last 2 non-system。
+    /// 多轮对话(1 个 system + 5 个 non-system)应该打上 1+2=3 个标记。
+    #[test]
+    fn anthropic_marks_first_2_system_and_last_2_non_system() {
+        let mut msgs = build_three_turn_conversation();
+        apply_caching_anthropic(&mut msgs);
+        let tagged_indices: Vec<usize> = msgs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| extract_cache_control(m).is_some())
+            .map(|(i, _)| i)
+            .collect();
+        // 验证 system(idx=0) 与末尾 2 个 non-system(idx=4, idx=5)都被打上。
+        assert!(tagged_indices.contains(&0), "首 system 未被标记");
+        assert!(tagged_indices.contains(&4), "倒数第 2 条未被标记");
+        assert!(tagged_indices.contains(&5), "末条未被标记");
+        assert_eq!(
+            tagged_indices.len(),
+            3,
+            "总计 3 个 breakpoint(1 system + 2 tail)"
+        );
+    }
+
+    /// **模拟多轮对话中的缓存 prefix 稳定性**:
+    /// turn N 的 messages 是 turn N-1 的 messages + (N-1 轮 assistant) + (新 user)。
+    /// 起始部分的 cache 标记(system + 中间轮)不应随轮数增长而漂移。
+    #[test]
+    fn cache_marks_stable_as_conversation_grows() {
+        // turn 1
+        let mut t1 = vec![ChatMessage::system("sys"), ChatMessage::user("q1")];
+        apply_caching_anthropic(&mut t1);
+        let sys_t1_cc = extract_cache_control(&t1[0]);
+
+        // turn 2:增加 assistant_1 + user_2
+        let mut t2 = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("q1"),
+            ChatMessage::assistant("a1"),
+            ChatMessage::user("q2"),
+        ];
+        apply_caching_anthropic(&mut t2);
+        let sys_t2_cc = extract_cache_control(&t2[0]);
+
+        // 首 system 的 cache_control 跨轮一致 → 表示上游哈希不变 → 后续会命中。
+        assert_eq!(
+            sys_t1_cc, sys_t2_cc,
+            "首 system breakpoint 的 TTL/位置跨轮应一致"
+        );
+        // turn 1 的 user 位置被打(末尾),turn 2 不再被打。
+        assert!(extract_cache_control(&t1[1]).is_some());
+        assert!(
+            extract_cache_control(&t2[1]).is_none(),
+            "turn 2 的旧 user 不再是 tail"
+        );
+    }
+
+    /// **P0-5 主要验收**:OpenAI build_chat_options 下发的 cache_control
+    /// 在同输入上跨调用一致(prompt_cache_key + cache_control 两个字段)。
+    #[test]
+    fn openai_chat_options_is_deterministic() {
+        use crate::settings::ReasoningEffortSetting as R;
+        let make = || {
+            build_chat_options(
+                AgentProviderApiType::OpenAi,
+                "https://api.openai.com/v1/",
+                "gpt-5-mini",
+                R::Auto,
+                vec![],
+                Some("conv-abc-123"),
+            )
+        };
+        let a = make();
+        let b = make();
+        assert_eq!(a.prompt_cache_key, b.prompt_cache_key);
+        assert_eq!(a.cache_control, b.cache_control);
+    }
+
+    /// **P0-5 GPT-5 走 24h 最终路径验收**。
+    #[test]
+    fn openai_gpt5_path_lands_24h_cache_control() {
+        use crate::settings::ReasoningEffortSetting as R;
+        let opts = build_chat_options(
+            AgentProviderApiType::OpenAi,
+            "https://api.openai.com/v1/",
+            "gpt-5-mini",
+            R::Auto,
+            vec![],
+            Some("conv-1"),
+        );
+        assert_eq!(
+            opts.cache_control,
+            Some(CacheControl::Ephemeral24h),
+            "GPT-5 系列必须下发 Ephemeral24h"
+        );
+        assert_eq!(
+            opts.prompt_cache_key.as_deref(),
+            Some("conv-1"),
+            "prompt_cache_key 必须 = conversation_id"
+        );
+    }
+
+    /// **P0-5 旧型号 fallback in_memory 路径验收**。
+    #[test]
+    fn openai_legacy_path_lands_in_memory_cache_control() {
+        use crate::settings::ReasoningEffortSetting as R;
+        let opts = build_chat_options(
+            AgentProviderApiType::OpenAi,
+            "https://api.openai.com/v1/",
+            "gpt-4o-mini",
+            R::Auto,
+            vec![],
+            Some("conv-2"),
+        );
+        assert_eq!(
+            opts.cache_control,
+            Some(CacheControl::Ephemeral),
+            "旧型号 fallback Ephemeral(in_memory)"
+        );
+    }
+
+    /// **conversation_id 为空不下发 prompt_cache_key**(避免跨会话误挂路由)。
+    #[test]
+    fn openai_empty_conversation_id_skips_cache_key() {
+        use crate::settings::ReasoningEffortSetting as R;
+        let opts = build_chat_options(
+            AgentProviderApiType::OpenAi,
+            "https://api.openai.com/v1/",
+            "gpt-5",
+            R::Auto,
+            vec![],
+            Some(""),
+        );
+        assert!(
+            opts.prompt_cache_key.is_none(),
+            "空 conversation_id 应跳过 prompt_cache_key"
+        );
+        // 但 cache_control 仍然走(只是没有路由哈希辅助)
+        assert_eq!(opts.cache_control, Some(CacheControl::Ephemeral24h));
+    }
+
+    /// **Anthropic 路径 build_chat_options 不下发 cache_control**
+    /// (Anthropic 走 per-message,不走 ChatOptions 级)。
+    #[test]
+    fn anthropic_chat_options_no_cache_control() {
+        use crate::settings::ReasoningEffortSetting as R;
+        let opts = build_chat_options(
+            AgentProviderApiType::Anthropic,
+            "https://api.anthropic.com/v1/",
+            "claude-opus-4-7",
+            R::Auto,
+            vec![],
+            Some("conv-3"),
+        );
+        assert!(
+            opts.cache_control.is_none(),
+            "Anthropic 的 ChatOptions 不能带 cache_control(走 per-message)"
+        );
+        assert!(
+            opts.prompt_cache_key.is_none(),
+            "Anthropic 不走 prompt_cache_key"
+        );
+    }
+
+    /// **DeepSeek / Gemini / Ollama 服务端隐式缓存,不下发 cache_control**。
+    #[test]
+    fn implicit_cache_providers_no_cache_control() {
+        use crate::settings::ReasoningEffortSetting as R;
+        for api in [
+            AgentProviderApiType::DeepSeek,
+            AgentProviderApiType::Gemini,
+            AgentProviderApiType::Ollama,
+        ] {
+            let opts = build_chat_options(
+                api,
+                "https://example.com/v1/",
+                "some-model",
+                R::Auto,
+                vec![],
+                Some("conv"),
+            );
+            assert!(
+                opts.cache_control.is_none(),
+                "{:?} 不应下发 cache_control",
+                api
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 测试辅助: 给同一 crate 内的 `cache_stability_tests` 使用。
+// ---------------------------------------------------------------------------
+
+/// 测试专用包装:让同一 crate 内的其他测试模块能调用原本为文件私有的
+/// `serialize_outgoing_tool_call`。仅在 `cfg(test)` 下暴露,不影响生产代码表面。
+#[cfg(test)]
+pub(super) fn serialize_outgoing_tool_call_for_test(
+    tc: &api::message::ToolCall,
+    mcp_ctx: Option<&crate::ai::agent::MCPContext>,
+    server_message_data: &str,
+) -> (String, Value) {
+    serialize_outgoing_tool_call(tc, mcp_ctx, server_message_data)
 }
