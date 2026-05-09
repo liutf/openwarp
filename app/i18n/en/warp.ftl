@@ -1563,7 +1563,7 @@ settings-agent-providers-field-api-key = API Key
 settings-agent-providers-field-api-type = API Type
 settings-agent-providers-api-type-hint = (genai uses this to bind the adapter explicitly, avoiding misdetection by model name. If Base URL is empty, the default will be used: { $url })
 settings-agent-providers-name-placeholder = Custom provider name (e.g. DeepSeek, local Ollama)
-settings-agent-providers-api-key-placeholder = sk-... (saved to system keychain on blur or Enter)
+settings-agent-providers-api-key-placeholder = sk-... (optional, leave empty for local providers like ollama)
 settings-agent-providers-models-label = Models ({ $count })
 settings-agent-providers-models-empty-hint = No models configured yet. Click [+ Add model] to add manually, or [Fetch from API] to fetch automatically.
 settings-agent-providers-models-header-name = Display name
@@ -1578,6 +1578,8 @@ settings-agent-providers-add-model = + Add model
 settings-agent-providers-fetch-from-api = Fetch from API
 settings-agent-providers-sync-models-dev = Sync from models.dev
 settings-agent-providers-remove = Remove
+settings-agent-providers-save = Save
+settings-agent-providers-saved-toast = Saved
 
 # ---- AI page (settings_view/ai_page.rs) ----
 settings-ai-title = AI

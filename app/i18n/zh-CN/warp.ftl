@@ -1536,7 +1536,7 @@ settings-agent-providers-field-api-key = API 密钥
 settings-agent-providers-field-api-type = API 协议
 settings-agent-providers-api-type-hint = (genai 据此显式绑定 adapter,避免按模型名误识别。接口地址留空将使用默认: { $url })
 settings-agent-providers-name-placeholder = 自定义提供商名称(例如: DeepSeek、本地 Ollama)
-settings-agent-providers-api-key-placeholder = sk-... (失焦或按 Enter 保存到系统密钥库)
+settings-agent-providers-api-key-placeholder = sk-... (可选,本地无认证服务如 ollama 留空即可)
 settings-agent-providers-models-label = 模型列表 ({ $count } 个)
 settings-agent-providers-models-empty-hint = 还未配置模型。点 [+ 添加模型] 手动添加,或点 [Fetch from API] 自动抓取。
 settings-agent-providers-models-header-name = 显示名
@@ -1551,6 +1551,8 @@ settings-agent-providers-add-model = + 添加模型
 settings-agent-providers-fetch-from-api = 从 API 抓取
 settings-agent-providers-sync-models-dev = 从 models.dev 同步
 settings-agent-providers-remove = 移除
+settings-agent-providers-save = 保存
+settings-agent-providers-saved-toast = 已保存
 
 # ---- AI 子页 ----
 settings-ai-title = AI
