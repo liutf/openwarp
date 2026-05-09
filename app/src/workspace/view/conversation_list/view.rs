@@ -23,8 +23,6 @@ use crate::workspace::view::conversation_list::item::{
 };
 use crate::workspace::ToastStack;
 use crate::workspace::WorkspaceAction;
-use warp_core::features::FeatureFlag;
-use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::Icon;
 
 use super::view_model::{ConversationEntry, ConversationListViewModel};
@@ -490,7 +488,7 @@ impl ConversationListView {
                 };
 
                 // Use shared logic from ConversationOrTask to determine click action
-                if let Some(action) = item.get_open_action(None, ctx) {
+                if let Some(action) = item.get_open_action(None) {
                     Self::send_open_telemetry(&entry.id, ctx);
                     ctx.dispatch_typed_action(&action);
                 }
@@ -933,7 +931,7 @@ impl TypedActionView for ConversationListView {
                 let Some(item) = model.get_item_by_id(id, ctx) else {
                     return;
                 };
-                let Some(action) = item.get_open_action(None, ctx) else {
+                let Some(action) = item.get_open_action(None) else {
                     return;
                 };
 

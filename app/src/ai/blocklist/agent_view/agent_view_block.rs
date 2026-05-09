@@ -20,7 +20,6 @@ use crate::{
     },
     terminal::BlockListSettings,
     ui_components::blended_colors,
-    workspace::WorkspaceAction,
     BlocklistAIHistoryModel,
 };
 

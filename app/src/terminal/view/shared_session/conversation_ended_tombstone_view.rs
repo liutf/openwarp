@@ -19,7 +19,6 @@ use warp_core::paths::home_relative_path;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::ai::ambient_agents::AmbientAgentTask;
-use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::icons::Icon;
 use warp_core::ui::theme::{AnsiColorIdentifier, Fill};
 use warpui::elements::{

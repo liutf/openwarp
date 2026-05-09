@@ -183,7 +183,7 @@ use session_sharing_protocol::sharer::{RoleUpdateReason, SessionEndedReason, Ses
 use ssh_file_upload::{FileUpload, FileUploadEvent};
 use uuid::Uuid;
 use warp_core::channel::ChannelState;
-use warpui::elements::{shimmering_text::ShimmeringTextStateHandle, Border, ChildView};
+use warpui::elements::{shimmering_text::ShimmeringTextStateHandle, ChildView};
 use warpui::fonts::Properties;
 use warpui::{ViewHandle, WeakModelHandle};
 

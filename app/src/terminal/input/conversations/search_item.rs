@@ -6,7 +6,7 @@ use warp_core::ui::color::coloru_with_opacity;
 use warp_core::ui::theme::Fill;
 use warp_core::ui::Icon;
 use warpui::elements::{ConstrainedBox, Container, Highlight, ParentElement, Shrinkable, Text};
-use warpui::fonts::{Properties, Style, Weight};
+use warpui::fonts::{Properties, Weight};
 use warpui::prelude::{Align, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize};
 use warpui::scene::{CornerRadius, Radius};
 use warpui::text_layout::ClipConfig;

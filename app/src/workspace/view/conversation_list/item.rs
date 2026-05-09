@@ -220,7 +220,7 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
     .with_color(theme.sub_text_color(theme.background()).into())
     .finish();
 
-    let bottom_row = if let Some(subtext) = format_item_subtext(conversation, app) {
+    let bottom_row = if let Some(subtext) = format_item_subtext(conversation) {
         let subtext_element = Shrinkable::new(
             1.0,
             Text::new_inline(subtext, font_family, title_font_size - 2.)
@@ -260,7 +260,7 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
         .finish();
 
     // Use shared logic from ConversationOrTask to determine open action
-    let open_action = conversation.get_open_action(None, app);
+    let open_action = conversation.get_open_action(None);
     let title = conversation.title(app);
     let tooltip_text = truncate_from_end(&title, MAX_TOOLTIP_LENGTH);
     let overflow_button_state = state.overflow_button_state.clone();
@@ -389,7 +389,7 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
 /// Returns the secondary label for a conversation list item:
 /// - For local conversations: the working directory.
 /// - For tasks: the source (Linear, Slack, CLI, etc.)
-fn format_item_subtext(conversation: &ConversationOrTask, app: &AppContext) -> Option<String> {
+fn format_item_subtext(conversation: &ConversationOrTask) -> Option<String> {
     match conversation {
         ConversationOrTask::Task(task) => {
             task.source.as_ref().map(|s| s.display_name().to_string())

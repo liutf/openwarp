@@ -745,12 +745,11 @@ impl ConversationOrTask<'_> {
     }
 
     /// Returns the appropriate `WorkspaceAction` to dispatch when opening this item.
-    /// This encapsulates the decision logic for opening ambient agent sessions vs loading
-    /// cloud conversation data vs navigating to local conversations.
+    /// This encapsulates the decision logic for opening ambient agent sessions vs
+    /// navigating to local conversations.
     pub fn get_open_action(
         &self,
         restore_layout: Option<RestoreConversationLayout>,
-        app: &AppContext,
     ) -> Option<WorkspaceAction> {
         match self.link_preference() {
             LinkPreference::Session => match self {

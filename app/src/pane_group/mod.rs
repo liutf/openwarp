@@ -1758,7 +1758,7 @@ impl PaneGroup {
                 let restore_kind = match &task_data {
                     Some((_, Some(task))) => {
                         let item = ConversationOrTask::Task(task);
-                        match item.get_open_action(None, ctx) {
+                        match item.get_open_action(None) {
                             Some(WorkspaceAction::OpenAmbientAgentSession {
                                 session_id, ..
                             }) => AmbientRestoreKind::SharedSession { session_id },
@@ -3125,7 +3125,7 @@ impl PaneGroup {
             };
 
             let item = ConversationOrTask::Task(&task);
-            match item.get_open_action(None, ctx) {
+            match item.get_open_action(None) {
                 Some(WorkspaceAction::OpenAmbientAgentSession {
                     session_id,
                     task_id,
