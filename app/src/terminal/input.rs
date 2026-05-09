@@ -25,7 +25,6 @@ mod terminal_message_bar;
 mod universal;
 pub mod user_query;
 
-use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{AIAgentExchangeId, CancellationReason};
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
@@ -3653,10 +3652,7 @@ impl Input {
                 );
 
                 let conversation_id = conversation_navigation_data.id;
-                let active_ids =
-                    ActiveAgentViewsModel::as_ref(ctx).get_all_active_conversation_ids(ctx);
-                let is_active =
-                    active_ids.contains(&ConversationOrTaskId::ConversationId(conversation_id));
+                let is_active = false;
 
                 if self
                     .suggestions_mode_model

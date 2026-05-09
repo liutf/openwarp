@@ -19,7 +19,6 @@ use warpui::{
 
 use crate::{
     ai::{
-        active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId},
         agent::conversation::AIConversationId,
         blocklist::{
             agent_view::{
@@ -133,11 +132,6 @@ impl AgentViewZeroStateBlock {
                 }
             },
         );
-
-        let active_agent_views_model = ActiveAgentViewsModel::handle(ctx);
-        ctx.subscribe_to_model(&active_agent_views_model, |_, _, _, ctx| {
-            ctx.notify();
-        });
 
         let cloud_agent_view_model_clone = cloud_agent_view_model.clone();
         ctx.subscribe_to_model(
@@ -314,18 +308,9 @@ impl AgentViewZeroStateBlock {
         current_working_directory: &str,
         app: &AppContext,
     ) -> Vec<ConversationNavigationData> {
-        let open_conversation_ids = ActiveAgentViewsModel::as_ref(app)
-            .get_all_open_conversation_ids(app)
-            .iter()
-            .filter_map(ConversationOrTaskId::conversation_id)
-            .collect::<std::collections::HashSet<_>>();
         ConversationNavigationData::all_conversations(app)
             .into_iter()
             .filter(|conversation_data| {
-                if open_conversation_ids.contains(&conversation_data.id) {
-                    return false;
-                }
-
                 match conversation_data.latest_working_directory.as_ref() {
                     Some(latest_working_directory) => {
                         latest_working_directory == current_working_directory
