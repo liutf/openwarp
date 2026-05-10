@@ -27,7 +27,6 @@ use crate::{
 use about_page::AboutPageView;
 use ai_page::{AISettingsPageAction, AISettingsPageEvent, AISettingsPageView, AISubpage};
 use appearance_page::{AppearancePageAction, AppearanceSettingsPageView};
-use code_page::CodeSubpage;
 use code_page::{CodeSettingsPageAction, CodeSettingsPageEvent};
 use environments_page::EnvironmentsPageView;
 use features_page::{FeaturesPageView, FeaturesSettingsPageEvent};
@@ -208,13 +207,11 @@ pub enum SettingsSection {
     AgentProviders,
     Knowledge,
     ThirdPartyCLIAgents,
-    /// Internal backing-page identifier for CodeSettingsPageView. Multiple subpages
-    /// (CodeIndexing, EditorAndCodeReview) share this single backing page,
-    /// so this variant is needed as the key in `settings_pages`.
-    /// External callers should navigate to a specific subpage instead.
+    /// Internal backing-page identifier for CodeSettingsPageView. EditorAndCodeReview
+    /// is currently the only sub-page label, but we keep `Code` as the backing-page
+    /// key so that page lookup still works after the LSP-management subpage was
+    /// removed.
     Code,
-    // ── Code umbrella subpages ──
-    CodeIndexing,
     EditorAndCodeReview,
     // ── Cloud platform umbrella subpages ──
     CloudEnvironments,
@@ -249,7 +246,6 @@ impl Display for SettingsSection {
                 crate::t!("settings-section-third-party-cli-agents")
             }
             SettingsSection::Code => crate::t!("settings-section-code"),
-            SettingsSection::CodeIndexing => crate::t!("settings-section-code-indexing"),
             SettingsSection::EditorAndCodeReview => {
                 crate::t!("settings-section-editor-and-code-review")
             }
@@ -263,7 +259,7 @@ impl Display for SettingsSection {
 impl SettingsSection {
     /// Returns true if this section is a subpage under any umbrella.
     pub fn is_subpage(&self) -> bool {
-        self.is_ai_subpage() || self.is_code_subpage() || self.is_cloud_platform_subpage()
+        self.is_ai_subpage() || self.is_cloud_platform_subpage()
     }
 
     /// Returns true if this section is a subpage under the "Agents" umbrella.
@@ -279,11 +275,6 @@ impl SettingsSection {
         )
     }
 
-    /// Returns true if this section is a subpage under the "Code" umbrella.
-    pub fn is_code_subpage(&self) -> bool {
-        matches!(self, Self::CodeIndexing | Self::EditorAndCodeReview)
-    }
-
     /// Returns true if this section is a subpage under the "Cloud platform" umbrella.
     pub fn is_cloud_platform_subpage(&self) -> bool {
         matches!(self, Self::CloudEnvironments | Self::OzCloudAPIKeys)
@@ -297,8 +288,8 @@ impl SettingsSection {
             Self::AgentMCPServers => Self::MCPServers,
             // All other AI subpages render within the AI page.
             s if s.is_ai_subpage() => Self::AI,
-            // Code subpages render within the Code page.
-            s if s.is_code_subpage() => Self::Code,
+            // EditorAndCodeReview is the only label still pointing at the Code page.
+            Self::EditorAndCodeReview => Self::Code,
             // CloudEnvironments and OzCloudAPIKeys ARE their own backing pages
             // (1:1 mapping), so they return themselves.
             other => *other,
@@ -315,11 +306,6 @@ impl SettingsSection {
             Self::Knowledge,
             Self::ThirdPartyCLIAgents,
         ]
-    }
-
-    /// The ordered list of Code subpage sections shown under the Code umbrella.
-    pub fn code_subpages() -> &'static [Self] {
-        &[Self::CodeIndexing, Self::EditorAndCodeReview]
     }
 
     /// The ordered list of Cloud platform subpage sections.
@@ -354,7 +340,6 @@ impl FromStr for SettingsSection {
             "Providers" | "AgentProviders" => Ok(Self::AgentProviders),
             "Knowledge" => Ok(Self::Knowledge),
             "Third party CLI agents" | "ThirdPartyCLIAgents" => Ok(Self::ThirdPartyCLIAgents),
-            "LSP Management" | "Indexing and projects" | "CodeIndexing" => Ok(Self::CodeIndexing),
             "Editor and Code Review" | "EditorAndCodeReview" => Ok(Self::EditorAndCodeReview),
             "CloudEnvironments" => Ok(Self::CloudEnvironments),
             "Oz Cloud API Keys" | "OzCloudAPIKeys" => Ok(Self::OzCloudAPIKeys),
@@ -1198,13 +1183,7 @@ impl SettingsView {
                 "Agents",
                 SettingsSection::ai_subpages().to_vec(),
             )),
-            SettingsNavItem::Umbrella(SettingsUmbrella::new(
-                "Code",
-                vec![
-                    SettingsSection::CodeIndexing,
-                    SettingsSection::EditorAndCodeReview,
-                ],
-            )),
+            SettingsNavItem::Page(SettingsSection::Code),
             SettingsNavItem::Page(SettingsSection::Appearance),
             SettingsNavItem::Page(SettingsSection::Features),
             SettingsNavItem::Page(SettingsSection::Keybindings),
@@ -1222,7 +1201,6 @@ impl SettingsView {
         // Resolve the initial page: map internal backing-page sections to their default subpage.
         let initial_page = match page {
             Some(SettingsSection::AI) => SettingsSection::WarpAgent,
-            Some(SettingsSection::Code) => SettingsSection::CodeIndexing,
             Some(section) if section.is_subpage() => section,
             other => other.unwrap_or_default(),
         };
@@ -1350,18 +1328,6 @@ impl SettingsView {
                             self.subpage_filter.insert(subpage_section, match_data);
                         }
                     }
-                    // Do the same for Code subpages.
-                    for &subpage_section in SettingsSection::code_subpages() {
-                        if let Some(subpage) = CodeSubpage::from_section(subpage_section) {
-                            self.code_page_handle.update(ctx, |view, ctx| {
-                                view.set_active_subpage(Some(subpage), ctx);
-                            });
-                            let match_data = self
-                                .code_page_handle
-                                .update(ctx, |view, ctx| view.update_filter(&search_query, ctx));
-                            self.subpage_filter.insert(subpage_section, match_data);
-                        }
-                    }
                 } else {
                     // Search cleared: restore umbrella expanded state.
                     for item in &mut self.nav_items {
@@ -1376,13 +1342,10 @@ impl SettingsView {
 
                 // Run the standard page-level filter (needed for non-subpage pages
                 // and for subpages with their own backing page like AgentMCPServers).
-                // Switch AI/Code to all-widgets mode so standalone backing page
+                // Switch AI to all-widgets mode so the standalone backing-page
                 // filter is correct for pages_filter.
                 if is_search_active {
                     self.ai_page_handle.update(ctx, |view, ctx| {
-                        view.set_active_subpage(None, ctx);
-                    });
-                    self.code_page_handle.update(ctx, |view, ctx| {
                         view.set_active_subpage(None, ctx);
                     });
                 }
@@ -1405,13 +1368,6 @@ impl SettingsView {
                     if current.is_ai_subpage() && current != SettingsSection::AgentMCPServers {
                         if let Some(subpage) = AISubpage::from_section(current) {
                             self.ai_page_handle.update(ctx, |view, ctx| {
-                                view.set_active_subpage(Some(subpage), ctx);
-                            });
-                        }
-                    }
-                    if current.is_code_subpage() {
-                        if let Some(subpage) = CodeSubpage::from_section(current) {
-                            self.code_page_handle.update(ctx, |view, ctx| {
                                 view.set_active_subpage(Some(subpage), ctx);
                             });
                         }
@@ -1835,7 +1791,6 @@ impl SettingsView {
         // External callers should use subpage variants directly.
         let section = match section {
             SettingsSection::AI => SettingsSection::WarpAgent,
-            SettingsSection::Code => SettingsSection::CodeIndexing,
             other => other,
         };
 
@@ -1874,13 +1829,6 @@ impl SettingsView {
             if section.is_ai_subpage() && section != SettingsSection::AgentMCPServers {
                 let subpage = AISubpage::from_section(section);
                 self.ai_page_handle.update(ctx, |view, ctx| {
-                    view.set_active_subpage(subpage, ctx);
-                });
-            }
-            // Code subpages: update the Code page's subpage mode.
-            if section.is_code_subpage() {
-                let subpage = CodeSubpage::from_section(section);
-                self.code_page_handle.update(ctx, |view, ctx| {
                     view.set_active_subpage(subpage, ctx);
                 });
             }

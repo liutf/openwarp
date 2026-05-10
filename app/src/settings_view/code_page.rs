@@ -1,9 +1,16 @@
+//! Code 设置页:OpenWarp 在 LSP 全栈 + 持久化 workspace 历史下线后,
+//! 这个页面只剩「编辑器与代码评审」相关的几个本地开关。
+//!
+//! 历史上这里还承载 LSP 管理子页 + codebase indexing,但都已下线;
+//! `Code` 在侧边栏不再是 umbrella(没有第二个子页可挂),改为单层 Page。
+//! 页面渲染的就是这一组开关本身。
+
 #[cfg(feature = "local_fs")]
 use super::features::external_editor::ExternalEditorView;
 use super::{
     settings_page::{
-        build_sub_header, render_body_item, render_separator, Category, MatchData, PageType,
-        SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, HEADER_PADDING,
+        render_body_item, MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle,
+        SettingsWidget,
     },
     LocalOnlyIconState, SettingsAction, SettingsSection, ToggleState,
 };
@@ -17,45 +24,14 @@ use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
 use std::path::PathBuf;
 use warp_core::{features::FeatureFlag, report_if_error, settings::ToggleableSetting as _};
 use warpui::{
-    elements::{ChildView, Container, Element, Empty, Flex, ParentElement},
-    fonts::Weight,
+    elements::{ChildView, Element, Empty},
     keymap::ContextPredicate,
-    ui_components::{
-        components::{UiComponent, UiComponentStyles},
-        switch::SwitchStateHandle,
-    },
+    ui_components::{components::UiComponent, switch::SwitchStateHandle},
     Action, AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
-/// Identifies which subpage of the Code settings the user is viewing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CodeSubpage {
-    /// Codebase indexing and initialization settings.
-    Indexing,
-    /// External editor, code review panel, and project explorer settings.
-    EditorAndCodeReview,
-}
-
-impl CodeSubpage {
-    pub fn from_section(section: SettingsSection) -> Option<Self> {
-        match section {
-            SettingsSection::CodeIndexing => Some(Self::Indexing),
-            SettingsSection::EditorAndCodeReview => Some(Self::EditorAndCodeReview),
-            _ => None,
-        }
-    }
-
-    pub fn title(&self) -> String {
-        match self {
-            Self::Indexing => crate::t!("settings-code-subpage-indexing-title"),
-            Self::EditorAndCodeReview => crate::t!("settings-code-subpage-editor-review-title"),
-        }
-    }
-}
-
 pub struct CodeSettingsPageView {
     page: PageType<Self>,
-    active_subpage: Option<CodeSubpage>,
     #[cfg(feature = "local_fs")]
     external_editor_view: Option<ViewHandle<ExternalEditorView>>,
 }
@@ -63,158 +39,69 @@ pub struct CodeSettingsPageView {
 impl CodeSettingsPageView {
     pub fn new(ctx: &mut ViewContext<CodeSettingsPageView>) -> Self {
         // 订阅 ProjectContextModel:project rules 变动时重渲染,
-        // 让任何依赖 rule 集合的子页面/组件保持最新。
+        // 让任何依赖 rule 集合的子组件保持最新。
         ctx.subscribe_to_model(&ProjectContextModel::handle(ctx), |_me, _, event, ctx| {
             if matches!(event, ProjectContextModelEvent::KnownRulesChanged(_)) {
                 ctx.notify();
             }
         });
 
-        let code_page_widget = CodePageWidget;
-
-        #[cfg(feature = "local_fs")]
-        let external_editor_view;
-        let page = if FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
-            #[cfg(feature = "local_fs")]
-            {
-                external_editor_view = Some(ctx.add_typed_action_view(ExternalEditorView::new));
-            }
-
-            let codebase_indexing_widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
-                vec![Box::new(CodebaseIndexingCategorizedWidget {
-                    inner: code_page_widget,
-                })];
-            #[cfg(feature = "local_fs")]
-            let mut code_editor_review_widgets: Vec<
-                Box<dyn SettingsWidget<View = Self>>,
-            > = vec![Box::new(ExternalEditorCodeWidget)];
-            #[cfg(not(feature = "local_fs"))]
-            let mut code_editor_review_widgets: Vec<
-                Box<dyn SettingsWidget<View = Self>>,
-            > = vec![];
-            code_editor_review_widgets.extend([
-                Box::new(AutoOpenCodeReviewPaneCodeWidget::default())
-                    as Box<dyn SettingsWidget<View = Self>>,
-                Box::new(CodeReviewPanelToggleWidget::default()),
-                Box::new(CodeReviewDiffStatsToggleWidget::default()),
-                Box::new(ProjectExplorerToggleWidget::default()),
-                Box::new(GlobalSearchToggleWidget::default()),
-            ]);
-            let categories = vec![
-                Category::new(
-                    &*Box::leak(
-                        crate::t!("settings-code-category-codebase-indexing").into_boxed_str(),
-                    ),
-                    codebase_indexing_widgets,
-                ),
-                Category::new(
-                    &*Box::leak(crate::t!("settings-code-category-editor-review").into_boxed_str()),
-                    code_editor_review_widgets,
-                ),
-            ];
-            PageType::new_categorized(categories, None)
-        } else {
-            #[cfg(feature = "local_fs")]
-            {
-                external_editor_view = None;
-            }
-            let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
-                vec![Box::new(code_page_widget)];
-            PageType::new_uncategorized(widgets, None)
-        };
+        let (page, external_editor_view) = Self::build_page(ctx);
 
         Self {
             page,
-            active_subpage: None,
             #[cfg(feature = "local_fs")]
             external_editor_view,
         }
     }
 
-    /// 设置当前激活的子页面,并按需重建 page。
-    pub fn set_active_subpage(
-        &mut self,
-        subpage: Option<CodeSubpage>,
+    /// 构造页面 widgets。Code 现在是单页(无子页面、无 category 标题),
+    /// 直接铺平展示「编辑器与代码评审」开关。
+    #[cfg(feature = "local_fs")]
+    fn build_page(
         ctx: &mut ViewContext<Self>,
-    ) {
-        if self.active_subpage != subpage {
-            self.active_subpage = subpage;
-            // 按子页面的内容重建 widgets;subpage 为 None 时回到完整 categorized 页面。
-            if let Some(subpage) = subpage {
-                let mut widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
-                    vec![Box::new(CodeSubpageHeaderWidget {
-                        title: subpage.title(),
-                    })];
-                match subpage {
-                    CodeSubpage::Indexing => {
-                        widgets.push(Box::new(CodebaseIndexingCategorizedWidget {
-                            inner: CodePageWidget,
-                        }));
-                    }
-                    CodeSubpage::EditorAndCodeReview => {
-                        #[cfg(feature = "local_fs")]
-                        widgets.push(Box::new(ExternalEditorCodeWidget));
-                        widgets.extend([
-                            Box::new(AutoOpenCodeReviewPaneCodeWidget::default())
-                                as Box<dyn SettingsWidget<View = Self>>,
-                            Box::new(CodeReviewPanelToggleWidget::default()),
-                            Box::new(CodeReviewDiffStatsToggleWidget::default()),
-                            Box::new(ProjectExplorerToggleWidget::default()),
-                            Box::new(GlobalSearchToggleWidget::default()),
-                        ]);
-                    }
-                }
-                // subpage widgets 自带 subheader 标题,所以这里不再传 page 级别的 title。
-                self.page = PageType::new_uncategorized(widgets, None);
-            } else {
-                // None:重建完整的 categorized 页面(包含全部 widgets)。
-                self.page = Self::build_full_page(ctx);
-            }
-            ctx.notify();
-        }
-    }
-
-    /// 构建完整的 categorized 页面,用于默认/legacy 视图,以及搜索时回到全部 widgets 模式。
-    fn build_full_page(_ctx: &mut ViewContext<Self>) -> PageType<Self> {
-        if FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
-            let code_page_widget = CodePageWidget;
-            let codebase_indexing_widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
-                vec![Box::new(CodebaseIndexingCategorizedWidget {
-                    inner: code_page_widget,
-                })];
-            #[cfg(feature = "local_fs")]
-            let mut code_editor_review_widgets: Vec<
-                Box<dyn SettingsWidget<View = Self>>,
-            > = vec![Box::new(ExternalEditorCodeWidget)];
-            #[cfg(not(feature = "local_fs"))]
-            let mut code_editor_review_widgets: Vec<
-                Box<dyn SettingsWidget<View = Self>>,
-            > = vec![];
-            code_editor_review_widgets.extend([
-                Box::new(AutoOpenCodeReviewPaneCodeWidget::default())
-                    as Box<dyn SettingsWidget<View = Self>>,
+    ) -> (PageType<Self>, Option<ViewHandle<ExternalEditorView>>) {
+        let (widgets, external_editor_view) = if FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
+        {
+            let editor_view = ctx.add_typed_action_view(ExternalEditorView::new);
+            let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
+                Box::new(ExternalEditorCodeWidget),
+                Box::new(AutoOpenCodeReviewPaneCodeWidget::default()),
                 Box::new(CodeReviewPanelToggleWidget::default()),
                 Box::new(CodeReviewDiffStatsToggleWidget::default()),
                 Box::new(ProjectExplorerToggleWidget::default()),
                 Box::new(GlobalSearchToggleWidget::default()),
-            ]);
-            let categories = vec![
-                Category::new(
-                    &*Box::leak(
-                        crate::t!("settings-code-category-codebase-indexing").into_boxed_str(),
-                    ),
-                    codebase_indexing_widgets,
-                ),
-                Category::new(
-                    &*Box::leak(crate::t!("settings-code-category-editor-review").into_boxed_str()),
-                    code_editor_review_widgets,
-                ),
             ];
-            PageType::new_categorized(categories, None)
+            (widgets, Some(editor_view))
         } else {
-            let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![Box::new(CodePageWidget)];
-            PageType::new_uncategorized(widgets, None)
-        }
+            // legacy 视图:旧设置模式下 Code 页不渲染任何内容(原 CodePageWidget
+            // 仅渲染一个 LSP 时代的 header,无实际意义,直接返回空页面)。
+            (vec![], None)
+        };
+        (
+            PageType::new_uncategorized(widgets, None),
+            external_editor_view,
+        )
+    }
+
+    /// wasm 构建下没有 ExternalEditorView,只渲染 4 个非外部编辑器开关。
+    #[cfg(not(feature = "local_fs"))]
+    fn build_page(
+        _ctx: &mut ViewContext<Self>,
+    ) -> (PageType<Self>, Option<ViewHandle<ExternalEditorView>>) {
+        let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
+            if FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
+                vec![
+                    Box::new(AutoOpenCodeReviewPaneCodeWidget::default()),
+                    Box::new(CodeReviewPanelToggleWidget::default()),
+                    Box::new(CodeReviewDiffStatsToggleWidget::default()),
+                    Box::new(ProjectExplorerToggleWidget::default()),
+                    Box::new(GlobalSearchToggleWidget::default()),
+                ]
+            } else {
+                vec![]
+            };
+        (PageType::new_uncategorized(widgets, None), None)
     }
 }
 
@@ -238,7 +125,6 @@ pub enum CodeSettingsPageEvent {
     OpenProjectRules { rule_paths: Vec<PathBuf> },
 }
 
-// Code 页面的 actions 定义。
 #[derive(Debug, Clone)]
 pub enum CodeSettingsPageAction {
     SignupAnonymousUser,
@@ -317,105 +203,6 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     _context: &ContextPredicate,
     _builder: fn(SettingsAction) -> T,
 ) {
-}
-
-struct CodePageWidget;
-
-impl SettingsWidget for CodePageWidget {
-    type View = CodeSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        "code coding project rules"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        _app: &AppContext,
-    ) -> Box<dyn Element> {
-        let mut content = Flex::column();
-
-        content.add_child(self.render_code_header(appearance));
-        content.add_child(render_separator(appearance));
-
-        Container::new(content.finish())
-            .with_uniform_padding(24.0)
-            .finish()
-    }
-}
-
-impl CodePageWidget {
-    /// 渲染主标题 "Code"。
-    fn render_code_header(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let theme = appearance.theme();
-
-        Container::new(
-            ui_builder
-                .span(crate::t!("settings-code-feature-name"))
-                .with_style(UiComponentStyles {
-                    font_size: Some(24.0),
-                    font_weight: Some(Weight::Bold),
-                    font_color: Some(theme.active_ui_text_color().into()),
-                    ..Default::default()
-                })
-                .build()
-                .finish(),
-        )
-        .with_padding_bottom(15.)
-        .finish()
-    }
-}
-
-/// 简单的子页面标题 widget,只渲染 subheader 文本。
-struct CodeSubpageHeaderWidget {
-    title: String,
-}
-
-impl SettingsWidget for CodeSubpageHeaderWidget {
-    type View = CodeSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        &self.title
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        _app: &AppContext,
-    ) -> Box<dyn Element> {
-        build_sub_header(appearance, self.title.clone(), None)
-            .with_padding_bottom(HEADER_PADDING)
-            .finish()
-    }
-}
-
-/// LSP 子系统已下线,该 widget 目前没有可渲染的 codebase indexing 内容;
-/// 保留它是为了让 page/category 结构以及 subpage 路由继续可用,
-/// 等后续有新的"项目规则 / 仓库索引"内容时再填回来。
-struct CodebaseIndexingCategorizedWidget {
-    inner: CodePageWidget,
-}
-
-impl SettingsWidget for CodebaseIndexingCategorizedWidget {
-    type View = CodeSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        "repository code path project rules"
-    }
-
-    fn render(
-        &self,
-        view: &Self::View,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Box<dyn Element> {
-        // 仍把渲染委托给 inner 的 header 部分,避免 inner 字段成为死码,
-        // 也让用户在该子页面下能看到一致的 "Code" 标题与分隔线。
-        self.inner.render(view, appearance, app)
-    }
 }
 
 #[cfg(feature = "local_fs")]

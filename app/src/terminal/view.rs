@@ -9056,7 +9056,7 @@ impl TerminalView {
                 ctx.notify();
             }
             CodebaseIndexSpeedbumpBannerAction::ViewStatus => {
-                ctx.emit(Event::OpenSettings(SettingsSection::CodeIndexing));
+                ctx.emit(Event::OpenSettings(SettingsSection::EditorAndCodeReview));
             }
             CodebaseIndexSpeedbumpBannerAction::DismissForever => {
                 AISettings::handle(ctx).update(ctx, |ai_settings, ctx| {
