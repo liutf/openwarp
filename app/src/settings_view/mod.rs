@@ -172,9 +172,6 @@ pub enum SettingsViewEvent {
     OpenAIFactCollection,
     OpenMCPServerCollection,
     OpenExecutionProfileEditor(ClientProfileId),
-    OpenLspLogs {
-        log_path: PathBuf,
-    },
     OpenProjectRulesPane {
         rule_paths: Vec<PathBuf>,
     },
@@ -1795,11 +1792,6 @@ impl SettingsView {
         match event {
             CodeSettingsPageEvent::SignupAnonymousUser => {
                 ctx.emit(SettingsViewEvent::SignupAnonymousUser)
-            }
-            CodeSettingsPageEvent::OpenLspLogs { log_path } => {
-                ctx.emit(SettingsViewEvent::OpenLspLogs {
-                    log_path: log_path.clone(),
-                });
             }
             CodeSettingsPageEvent::OpenProjectRules { rule_paths } => {
                 ctx.emit(SettingsViewEvent::OpenProjectRulesPane {

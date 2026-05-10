@@ -113,8 +113,6 @@ use crate::ai::blocklist::codebase_index_speedbump_banner::{
     CodebaseIndexSpeedbumpBannerAction, CodebaseIndexSpeedbumpBannerState, VisibilityState,
 };
 use crate::ai::blocklist::model::AIBlockOutputStatus;
-#[cfg(feature = "local_fs")]
-use crate::ai::persisted_workspace::PersistedWorkspace;
 use crate::code_review::comments::{
     convert_insert_review_comments, AttachedReviewComment, PendingImportedReviewComment,
 };
@@ -10834,10 +10832,6 @@ impl TerminalView {
                                             return;
                                         }
 
-                                        PersistedWorkspace::handle(ctx).update(ctx, |manager, _| {
-                                            manager.navigated_to_path(active_directory.as_path_buf());
-                                        });
-
                                         // Subscribe to GitRepoStatusModel if the repo changed
                                         // and git status updates are needed.
                                         if old_repo_path.as_ref() != Some(repo_path) {
@@ -10858,8 +10852,6 @@ impl TerminalView {
                                                 );
                                             });
                                         }
-
-                                        me.start_lsp_server_in_active_pwd(ctx);
 
                                         me.update_repo_banner_state(
                                             repo_path.clone(),
@@ -23412,39 +23404,6 @@ impl TerminalView {
             .set_show_bootstrap_block(true);
     }
 
-    /// Starts all enabled LSP servers for the current working directory.
-    ///
-    /// 优先使用检测到的 git 仓库根 (`current_repo_path`) 作为
-    /// `workspace_root` 传给 LSP——这样在子目录里 cd 时也能正确取到整仓库,
-    /// 避免为同一仓库不同子路径重复启动 LSP。拿不到 repo 根时 fallback 到 cwd,
-    /// 交给下游 `workspace_root_for_lsp` 再判断是否要启动。
-    #[cfg(feature = "local_fs")]
-    fn start_lsp_server_in_active_pwd(&self, ctx: &mut ViewContext<Self>) {
-        use crate::ai::persisted_workspace::LspTask;
-
-        let workspace_root = if let Some(repo_path) = self.current_repo_path.clone() {
-            repo_path
-        } else if let Some(cwd) = self
-            .pwd_if_local(ctx)
-            .map(PathBuf::from)
-            .and_then(|p| p.canonicalize().ok())
-        {
-            cwd
-        } else {
-            return;
-        };
-
-        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
-            workspace.execute_lsp_task(
-                LspTask::Spawn {
-                    file_path: workspace_root,
-                    server_type: None,
-                },
-                ctx,
-            );
-        });
-    }
-
     pub(super) fn toggle_file_tree(
         &mut self,
         cli_agent: Option<crate::server::telemetry::CLIAgentType>,
@@ -23690,8 +23649,7 @@ impl TypedActionView for TerminalView {
             | ResumeConversation
             | ForkConversationFromLastKnownGoodState
             | ToggleAIDocumentPane
-            | ClearMarkedText
-            | StartLspServer => ActionAccessibilityContent::from_debug(),
+            | ClearMarkedText => ActionAccessibilityContent::from_debug(),
             #[cfg(feature = "local_fs")]
             OpenCodeInWarp { .. } => ActionAccessibilityContent::from_debug(),
             OpenInWarpBanner(action) => self.open_in_warp_banner_accessibility_content(*action),
@@ -24705,10 +24663,6 @@ impl TypedActionView for TerminalView {
                     }
                 });
                 ctx.notify();
-            }
-            StartLspServer => {
-                #[cfg(feature = "local_fs")]
-                self.start_lsp_server_in_active_pwd(ctx);
             }
             OpenConversationsPalette => {
                 ctx.emit(Event::OpenConversationHistory);

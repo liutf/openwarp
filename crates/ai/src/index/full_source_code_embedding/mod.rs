@@ -12,7 +12,19 @@ use thiserror::Error;
 use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity};
 
 use crate::index::locations::CodeContextLocation;
-use crate::workspace::{WorkspaceMetadata, WorkspaceMetadataEvent};
+
+/// stub 占位:原 `crate::workspace::WorkspaceMetadata`,已随持久化 workspace 历史一并下线。
+/// 仅为保留旧 API surface 让 stub 可编译。
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceMetadata;
+
+/// stub 占位:原 `crate::workspace::WorkspaceMetadataEvent`。
+#[derive(Debug, Clone, Copy)]
+pub enum WorkspaceMetadataEvent {
+    Queried,
+    Modified,
+    Created,
+}
 
 // =============================================================================
 // 顶层占位类型

@@ -16,8 +16,7 @@ use super::schema::{
     object_metadata, object_permissions, pane_branches, pane_leaves, pane_nodes, panels,
     project_rules, projects, server_experiments, settings_panes, ssh_nodes, ssh_servers, tabs,
     team_members, team_settings, teams, terminal_panes, user_profiles, welcome_panes, windows,
-    workflow_panes, workflows, workspace_language_server, workspace_metadata, workspace_teams,
-    workspaces,
+    workflow_panes, workflows, workspace_teams, workspaces,
 };
 
 #[derive(Insertable)]
@@ -181,42 +180,6 @@ pub struct ProjectRules {
 pub struct NewProjectRules {
     pub path: String,
     pub project_root: String,
-}
-
-#[derive(Clone, Identifiable, Queryable, AsChangeset)]
-#[diesel(table_name = workspace_metadata)]
-pub struct WorkspaceMetadata {
-    pub id: i32,
-    pub repo_path: String,
-    pub navigated_ts: Option<NaiveDateTime>,
-    pub modified_ts: Option<NaiveDateTime>,
-    pub queried_ts: Option<NaiveDateTime>,
-}
-
-#[derive(Clone, Insertable, AsChangeset)]
-#[diesel(table_name = workspace_metadata)]
-pub struct NewWorkspaceMetadata {
-    pub repo_path: String,
-    pub navigated_ts: Option<NaiveDateTime>,
-    pub modified_ts: Option<NaiveDateTime>,
-    pub queried_ts: Option<NaiveDateTime>,
-}
-
-#[derive(Clone, Identifiable, Insertable, Queryable, AsChangeset)]
-#[diesel(table_name = workspace_language_server)]
-pub struct WorkspaceLanguageServer {
-    pub id: i32,
-    pub workspace_id: i32,
-    pub language_server_name: String,
-    pub enabled: String,
-}
-
-#[derive(Clone, Insertable, AsChangeset)]
-#[diesel(table_name = workspace_language_server)]
-pub struct NewWorkspaceLanguageServer {
-    pub workspace_id: i32,
-    pub language_server_name: String,
-    pub enabled: String,
 }
 
 #[derive(Default, Clone, Debug, Insertable, Queryable, AsChangeset)]

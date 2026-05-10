@@ -125,7 +125,6 @@ jaq-all.workspace = true
 jemalloc_pprof = { version = "0.8.1", optional = true, features = [
     "symbolize",
 ] }
-lsp-types = "0.97.0"
 indexmap = { version = "2.0.2", features = ["serde"] }
 input_classifier.workspace = true
 instant.workspace = true
@@ -139,7 +138,6 @@ libc.workspace = true
 line-ending.workspace = true
 log.workspace = true
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-lsp.workspace = true
 warp_logging.workspace = true
 sentry = { workspace = true, optional = true }
 lz4_flex = "0.11"
@@ -713,7 +711,6 @@ local_computer_use = []
 # environments.
 local_fs = [
     "ai/local_fs",
-    "lsp/local_fs",
     "persistence/local_fs",
     "repo_metadata/local_fs",
     "warp_core/local_fs",
@@ -896,7 +893,6 @@ agent_view_conversation_list_view = ["agent_view"]
 inline_history_menu = ["agent_view"]
 inline_repo_menu = ["agent_view"]
 summarization_via_message_replacement = []
-lsp_as_a_tool = []
 inline_model_selector = ["agent_view"]
 inline_profile_selector = ["agent_view"]
 oz_platform_skills = []

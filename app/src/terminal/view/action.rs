@@ -391,8 +391,6 @@ pub enum TerminalAction {
         source: PaletteSource,
     },
     DismissCodeToolbeltTooltip,
-    /// Start a Language Server for the current working directory (if supported)
-    StartLspServer,
     /// Start the guided Warp Environment setup flow (inserts the inline setup block).
     SetupCloudEnvironment(Vec<String>),
     /// Start the guided Warp Environment setup flow immediately (no inline setup block).
@@ -670,7 +668,6 @@ impl fmt::Debug for TerminalAction {
             PickRepoToOpen => write!(f, "PickRepoToOpen"),
             OpenFilesPalette { .. } => write!(f, "OpenFilesPalette"),
             DismissCodeToolbeltTooltip => write!(f, "DismissCodeToolbeltTooltip"),
-            StartLspServer => write!(f, "StartLspServer"),
             SetupCloudEnvironment(_) => write!(f, "SetupCloudEnvironment"),
             SetupCloudEnvironmentAndStart(_) => write!(f, "SetupCloudEnvironmentAndStart"),
             TriggerEnvironmentSetupSelection(_) => write!(f, "TriggerEnvironmentSetupSelection"),
