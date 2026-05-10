@@ -23420,22 +23420,31 @@ impl TerminalView {
     }
 
     /// Starts all enabled LSP servers for the current working directory.
+    ///
+    /// 优先使用检测到的 git 仓库根 (`current_repo_path`) 作为
+    /// `workspace_root` 传给 LSP——这样在子目录里 cd 时也能正确取到整仓库,
+    /// 避免为同一仓库不同子路径重复启动 LSP。拿不到 repo 根时 fallback 到 cwd,
+    /// 交给下游 `workspace_root_for_lsp` 再判断是否要启动。
     #[cfg(feature = "local_fs")]
     fn start_lsp_server_in_active_pwd(&self, ctx: &mut ViewContext<Self>) {
         use crate::ai::persisted_workspace::LspTask;
 
-        let Some(cwd) = self
+        let workspace_root = if let Some(repo_path) = self.current_repo_path.clone() {
+            repo_path
+        } else if let Some(cwd) = self
             .pwd_if_local(ctx)
             .map(PathBuf::from)
             .and_then(|p| p.canonicalize().ok())
-        else {
+        {
+            cwd
+        } else {
             return;
         };
 
         PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
             workspace.execute_lsp_task(
                 LspTask::Spawn {
-                    file_path: cwd,
+                    file_path: workspace_root,
                     server_type: None,
                 },
                 ctx,
