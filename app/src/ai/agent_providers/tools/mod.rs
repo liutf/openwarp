@@ -20,7 +20,6 @@
 //! 把 result 序列化为 `role=tool, tool_call_id=...` 的 content 给上游。
 
 pub mod ask;
-pub mod codebase;
 pub mod coerce;
 pub mod documents;
 pub mod edit;
@@ -79,8 +78,10 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     &files::READ_FILES,
     &search::GREP,
     &search::FILE_GLOB_V2,
-    // search_codebase 暂未对外暴露:代码索引(embeddings/symbol outline)尚未实现。
-    // 模块和静态值保留以便日后启用,见 codebase.rs。
+    // OpenWarp:原上游 search_codebase tool 不对外暴露。现 codebase.rs 文件也
+    // 已一并删除 —— 代码索引(embeddings/symbol outline)未实现,
+    // 且 BYOP 场景下由第三方 CLI agent (Claude Code / opencode 等) 走
+    // grep / read_file / mcp 代替,不需要该 tool。
     &edit::APPLY_FILE_DIFFS,
     &long_shell::WRITE_TO_LONG_RUNNING_SHELL_COMMAND,
     &long_shell::READ_SHELL_COMMAND_OUTPUT,

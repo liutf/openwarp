@@ -195,7 +195,6 @@ use crate::ai::facts::manager::AIFactManager;
 use crate::ai::llms::LLMPreferences;
 use crate::ai::mcp::MCPGalleryManager;
 use crate::ai::mcp::TemplatableMCPServerManager;
-use crate::ai::outline::RepoOutlines;
 use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::ai::skills::SkillManager;
 use crate::ai::AIRequestUsageModel;
@@ -822,6 +821,16 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
 
     init_common(&launch_mode, Some(&mut timer))?;
 
+    // SQLite 预热:在 app_builder.run() 调用之前就在后台线程起 init_db()
+    // (连接 + migration),让 SQLite 初始化与后续的 winit / wgpu 初始化
+    // 并发。主线程走到 persistence::initialize 时会接走预热连接。
+    // 仅 LaunchMode::App 需要(CLI / Worker / Test 走另外路径,这些不调用
+    // initialize_app 里的 persistence::initialize)。
+    if matches!(launch_mode, LaunchMode::App { .. }) {
+        log::info!("Triggering SQLite prewarm in background...");
+        crate::persistence::prewarm_db_in_background();
+    }
+
     // For wasm builds we have this special case to parse out the intent
     // from the url that is used to visite the app on web.
     #[cfg(target_family = "wasm")]
@@ -1313,13 +1322,17 @@ fn initialize_app(
     ctx.set_default_binding_validator(is_binding_cross_platform);
 
     if FeatureFlag::Autoupdate.is_enabled() {
-        // Attempt to clean up any old executable, whether or not we were
-        // explicitly launched as part of the auto-update process.  We may have
-        // failed to remove the executable on a previous launch of the app and
-        // should try again.
-        if let Err(e) = autoupdate::remove_old_executable() {
-            log::error!("Failed to remove old executable: {e:?}");
-        }
+        // 原:同步调用 remove_old_executable() 清理上一次 auto-update 遗留的旧
+        // 可执行文件。改:丢到 background_executor,跨平台路径当中只有 macOS
+        // 实际要做事(Linux/Windows 是 noop),在 macOS 上也只是 fs::remove_dir_all,
+        // 与主线程后续逻辑零依赖。失败原本就只是 log::error,后台跳不会丢信息。
+        ctx.background_executor()
+            .spawn(async {
+                if let Err(e) = autoupdate::remove_old_executable() {
+                    log::error!("Failed to remove old executable: {e:?}");
+                }
+            })
+            .detach();
     }
 
     experiments::init(ctx);
@@ -1418,6 +1431,9 @@ fn initialize_app(
         ctx.on_first_frame_drawn(move |ctx| {
             let timing_data = IntervalTimer::handle(ctx).update(ctx, |timer, _| {
                 timer.mark_interval_end("FIRST_FRAME_DRAWN");
+                // 本地调优出口:WARP_STARTUP_TRACE=1 时把完整启动时序表打到 stderr。
+                // 不影响遥测逻辑,仅为开发者使用。
+                timer.print_trace_to_stderr_if_enabled();
                 timer.compute_stats()
             });
             let event = TelemetryEvent::AppStartup(AppStartupInfo {
@@ -1458,6 +1474,15 @@ fn initialize_app(
             auth_state.clone(),
             ctx.background_executor().clone(),
         );
+
+        // 未登录用户也需要能查看启动时序(BYOP 场景占多数),在首帧后
+        // 打一次 WARP_STARTUP_TRACE 表。不发任何遥测,不影响逻辑。
+        ctx.on_first_frame_drawn(move |ctx| {
+            IntervalTimer::handle(ctx).update(ctx, |timer, _| {
+                timer.mark_interval_end("FIRST_FRAME_DRAWN");
+                timer.print_trace_to_stderr_if_enabled();
+            });
+        });
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -1582,6 +1607,8 @@ fn initialize_app(
         code_review::init(ctx);
     }
 
+    timer.mark_interval_end("SUBSYSTEM_INITS_DONE");
+
     let display_count = ctx.windows().display_count();
     ctx.add_singleton_model(|_| DisplayCount(display_count));
 
@@ -1615,6 +1642,8 @@ fn initialize_app(
     ctx.add_singleton_model(|_| {
         VoiceTranscriber::new(Arc::new(ServerVoiceTranscriber::new(server_api.clone())))
     });
+
+    timer.mark_interval_end("CORE_SINGLETONS_REGISTERED");
 
     let notebooks = cloud_objects
         .iter()
@@ -1666,6 +1695,8 @@ fn initialize_app(
         )
     });
 
+    timer.mark_interval_end("CLOUD_MODEL_INITIALIZED");
+
     {
         let conversations = &multi_agent_conversations;
         ctx.add_singleton_model(move |_| BlocklistAIHistoryModel::new(ai_queries, conversations));
@@ -1705,8 +1736,6 @@ fn initialize_app(
             ai::blocklist::orchestration_event_streamer::OrchestrationEventStreamer::new,
         );
     }
-
-    ctx.add_singleton_model(RepoOutlines::new);
 
     ctx.add_singleton_model(|_| UserProfiles::new(restored_user_profiles));
 

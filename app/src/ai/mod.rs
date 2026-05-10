@@ -22,7 +22,6 @@ pub(crate) mod conversation_navigation;
 pub(crate) mod conversation_status_ui;
 pub(crate) mod conversation_utils;
 pub(crate) mod document;
-pub(crate) mod get_relevant_files;
 pub(crate) mod harness_display;
 pub(crate) mod llms;
 pub mod onboarding;
@@ -46,7 +45,6 @@ pub(crate) mod generate_block_title;
 pub(crate) mod generate_code_review_content;
 pub(crate) mod loading;
 pub mod mcp;
-pub mod outline;
 
 pub(crate) use ai::paths;
 
