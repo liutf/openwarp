@@ -323,7 +323,7 @@ pub fn render_sub_sub_header(
         Container::new(
             Align::new(
                 Text::new_inline(text_name, appearance.ui_font_family(), CONTENT_FONT_SIZE)
-                    .with_style(Properties::default().weight(Weight::Bold))
+                    .with_style(Properties::default().weight(Weight::Semibold))
                     .with_color(appearance.theme().active_ui_text_color().into())
                     .finish(),
             )

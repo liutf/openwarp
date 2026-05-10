@@ -648,6 +648,33 @@ pub fn init(app: &mut AppContext) {
         .with_context_predicate(id!("Terminal") & id!("TerminalView_NonEmptyBlockList")),
     ]);
 
+    app.register_editable_bindings([
+        EditableBinding::new(
+            "terminal:scroll_up_one_page",
+            crate::t!("keybinding-desc-terminal-scroll-up-one-page"),
+            TerminalAction::PageUp,
+        )
+        .with_key_binding("pageup")
+        .with_context_predicate(
+            id!("Terminal")
+                & !id!("IMEOpen")
+                & id!("TerminalView_NonEmptyBlockList")
+                & !id!("EditorFocused"),
+        ),
+        EditableBinding::new(
+            "terminal:scroll_down_one_page",
+            crate::t!("keybinding-desc-terminal-scroll-down-one-page"),
+            TerminalAction::PageDown,
+        )
+        .with_key_binding("pagedown")
+        .with_context_predicate(
+            id!("Terminal")
+                & !id!("IMEOpen")
+                & id!("TerminalView_NonEmptyBlockList")
+                & !id!("EditorFocused"),
+        ),
+    ]);
+
     app.register_editable_bindings([EditableBinding::new(
         "terminal:scroll_to_top_of_selected_block",
         crate::t!("keybinding-desc-terminal-scroll-to-top-of-block"),

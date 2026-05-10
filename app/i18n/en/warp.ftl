@@ -32,6 +32,8 @@ common-upgrade = Upgrade
 common-default = Default
 common-editing = Editing
 common-viewing = Viewing
+common-tooltip-enter-edit-mode = Click to start editing
+common-tooltip-exit-edit-mode = Click to exit editing
 common-restored = Restored
 common-continued = Continued
 common-deleted = Deleted
@@ -611,7 +613,12 @@ settings-debug-hide-inband-blocks = Hide in-band command blocks
 # about_page.rs
 settings-about-copyright = Copyright 2026 Warp
 settings-about-automatic-updates-label = Automatic updates
-settings-about-automatic-updates-description = When enabled, OpenWarp checks for and downloads new versions in the background. When disabled, you can still check for updates manually.
+settings-about-automatic-updates-description = When enabled, OpenWarp checks for new versions in the background. When a new version is available, it will be shown above with a link to download manually from GitHub. OpenWarp never downloads or installs updates automatically.
+settings-about-update-checking = Checking for updates…
+settings-about-update-up-to-date = OpenWarp is up to date.
+settings-about-update-available = New version { $version } is available.
+settings-about-update-check-now = Check for updates
+settings-about-update-open-release = Download from GitHub
 
 # main_page.rs — referral / account
 settings-main-referral-cta = Earn rewards by sharing Warp with friends & colleagues
@@ -1611,7 +1618,7 @@ settings-agent-providers-field-api-key = API Key
 settings-agent-providers-field-api-type = API Type
 settings-agent-providers-api-type-hint = (genai uses this to bind the adapter explicitly, avoiding misdetection by model name. If Base URL is empty, the default will be used: { $url })
 settings-agent-providers-name-placeholder = Custom provider name (e.g. DeepSeek, local Ollama)
-settings-agent-providers-api-key-placeholder = sk-... (saved to system keychain on blur or Enter)
+settings-agent-providers-api-key-placeholder = sk-... (optional, leave empty for local providers like ollama)
 settings-agent-providers-models-label = Models ({ $count })
 settings-agent-providers-models-empty-hint = No models configured yet. Click [+ Add model] to add manually, or [Fetch from API] to fetch automatically.
 settings-agent-providers-models-header-name = Display name
@@ -1626,6 +1633,8 @@ settings-agent-providers-add-model = + Add model
 settings-agent-providers-fetch-from-api = Fetch from API
 settings-agent-providers-sync-models-dev = Sync from models.dev
 settings-agent-providers-remove = Remove
+settings-agent-providers-save = Save
+settings-agent-providers-saved-toast = Saved
 
 # ---- AI page (settings_view/ai_page.rs) ----
 settings-ai-title = AI
@@ -2206,7 +2215,6 @@ keybinding-desc-nbeditor-toggle-case-sensitive-find = Toggle case-sensitive sear
 # Pane group / undo close binding desc
 keybinding-desc-get-started-terminal-session = Terminal session
 keybinding-desc-undo-close-reopen-session = Reopen closed session
-keybinding-desc-pane-share-pane = Share pane
 keybinding-desc-right-panel-toggle-maximize-code-review = Toggle Maximize Code Review Panel
 
 # Workspace sync inputs binding desc
@@ -2476,7 +2484,6 @@ menu-ai-block-copy-path = Copy path
 menu-ai-block-copy-command = Copy command
 menu-ai-block-copy-git-branch = Copy git branch
 menu-ai-block-save-as-prompt = Save as prompt
-menu-ai-block-share-conversation = Share conversation
 menu-ai-block-copy-conversation-text = Copy conversation text
 menu-ai-block-fork-from-here = Fork from here
 menu-ai-block-rewind-to-before-here = Rewind to before here
@@ -2731,7 +2738,7 @@ drive-import-file-upload-error = Failed to upload file to server
 drive-import-folder-upload-error = Failed to upload folder to server
 
 # Drive main panel and workflow editor (app/src/drive/index.rs, app/src/drive/workflows/*)
-drive-title = Warp Drive
+drive-title = Drive
 drive-create-team-text = Share commands and knowledge with your teammates.
 drive-join-team-header = Collaborate with { $count } of your { $count ->
         [one] teammate
@@ -2776,7 +2783,6 @@ drive-copy-variables = Copy variables
 drive-load-in-subshell = Load in subshell
 drive-delete-forever = Delete forever
 drive-rename = Rename
-drive-share = Share
 drive-retry = Retry
 drive-move-to-space = Move to { $space }
 drive-open-on-desktop = Open on Desktop
@@ -2861,7 +2867,6 @@ workspace-conversation-list-no-matching = No matching conversations
 workspace-conversation-list-delete = Delete
 workspace-conversation-list-delete-in-progress-error = Conversations cannot be deleted while in progress.
 workspace-conversation-list-delete-ambient-tooltip = Ambient agent conversations cannot be deleted
-workspace-conversation-list-share-conversation = Share conversation
 workspace-conversation-list-fork-new-pane = Fork in new pane
 workspace-conversation-list-fork-new-tab = Fork in new tab
 workspace-conversation-list-fallback-title = Conversation
@@ -2984,13 +2989,6 @@ global-search-unavailable-description = Global search requires access to your lo
 global-search-remote-description = Global search requires access to your local workspace, which isn't supported in remote sessions
 global-search-unsupported-session-description = Global search doesn't currently work in Git Bash or WSL.
 global-search-failed = Global search failed.
-
-# Reward view (app/src/reward_view.rs)
-reward-title = Congrats!
-reward-subtitle-sent-referral = You earned an exclusive Warp theme for referring someone to Warp.
-reward-subtitle-received-referral = You earned an exclusive Warp theme for being referred to Warp.
-reward-cta = Try it out!
-reward-accessibility-help = Press enter to open the theme chooser or escape to dismiss.
 
 # Wasm NUX dialog (app/src/wasm_nux_dialog.rs)
 wasm-nux-open-desktop-title = Open in Warp Desktop?

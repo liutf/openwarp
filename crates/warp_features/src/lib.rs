@@ -920,9 +920,6 @@ pub const PREVIEW_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::BlocklistMarkdownTableRendering,
     FeatureFlag::MarkdownTables,
     FeatureFlag::OzIdentityFederation,
-    // Remote server binary is not yet supported on Windows.
-    #[cfg(not(windows))]
-    FeatureFlag::SshRemoteServer,
     FeatureFlag::GitOperationsInCodeReview,
 ];
 
@@ -933,9 +930,14 @@ pub const RELEASE_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::Autoupdate,
     FeatureFlag::Changelog,
     FeatureFlag::CrashReporting,
-    // Marked text is currently only supported on MacOS.
-    #[cfg(target_os = "macos")]
+    // winit 的 IME 路径在 macOS 和 Windows 都已支持 marked text。
+    // Windows 必须开启该 flag 才能渲染 IME preedit / 输入合成文本,
+    // 否则只能看到 OS 的候选窗,Warp 会把 marked text 更新整体丢弃。
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     FeatureFlag::ImeMarkedText,
+    // Remote server binary is not yet supported on Windows.
+    #[cfg(not(windows))]
+    FeatureFlag::SshRemoteServer,
 ];
 
 /// Flags that we want to allow to switch at runtime (assuming RuntimeFeatureFlags is set)
