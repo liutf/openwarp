@@ -51,6 +51,7 @@ mod modal;
 mod network;
 mod notebooks;
 mod notification;
+mod notifications;
 mod palette;
 mod persistence;
 mod platform;
@@ -1549,6 +1550,7 @@ fn initialize_app(
     tips::tip_view::init(ctx);
     launch_configs::init(ctx);
     workflows::init(ctx);
+    notifications::init(ctx);
     themes::theme_chooser::init(ctx);
     themes::theme_creator_modal::init(ctx);
     themes::theme_deletion_modal::init(ctx);
@@ -1694,6 +1696,9 @@ fn initialize_app(
     }
     ctx.add_singleton_model(|_| CLIAgentSessionsModel::new());
     ctx.add_singleton_model(BlocklistAIPermissions::new);
+    // 通知中心单例 model:必须排在 BlocklistAIHistoryModel
+    // 和 CLIAgentSessionsModel 之后注册,因为构造时会订阅这两个 model。
+    ctx.add_singleton_model(crate::notifications::model::NotificationsModel::new);
     ctx.add_singleton_model(ai::blocklist::orchestration_events::OrchestrationEventService::new);
     if warp_core::features::FeatureFlag::OrchestrationV2.is_enabled() {
         ctx.add_singleton_model(

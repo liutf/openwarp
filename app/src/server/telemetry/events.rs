@@ -494,6 +494,17 @@ pub enum NotificationAgentVariant {
     CLIAgent(CLIAgentType),
 }
 
+impl From<crate::notifications::NotificationSourceAgent> for NotificationAgentVariant {
+    fn from(agent: crate::notifications::NotificationSourceAgent) -> Self {
+        match agent {
+            crate::notifications::NotificationSourceAgent::Oz => Self::Oz,
+            crate::notifications::NotificationSourceAgent::CLI(cli_agent) => {
+                Self::CLIAgent(cli_agent.into())
+            }
+        }
+    }
+}
+
 /// The action taken on a plugin chip (for telemetry purposes).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

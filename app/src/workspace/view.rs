@@ -69,6 +69,11 @@ use crate::coding_panel_enablement_state::CodingPanelEnablementState;
 use crate::default_terminal::DefaultTerminal;
 use crate::notebooks::CloudNotebook;
 use crate::notification::NotificationContext;
+use crate::notifications::model::NotificationsModel;
+use crate::notifications::{
+    AgentNotificationToastStack, NotificationFilter, NotificationMailboxView,
+    NotificationMailboxViewEvent,
+};
 use crate::pane_group::pane::ActionOrigin;
 use crate::projects::ProjectManagementModel;
 use crate::settings_view::mcp_servers_page::MCPServersSettingsPage;
@@ -946,6 +951,11 @@ pub struct Workspace {
     toast_stack: ViewHandle<DismissibleToastStack<WorkspaceAction>>,
     agent_toast_stack: ViewHandle<AgentToastStack>,
     update_toast_stack: ViewHandle<DismissibleToastStack<WorkspaceAction>>,
+    /// 通知中心信箱(标题栏右上角 Inbox 按钮的下拉浮层)。
+    /// 仅在 `HOANotifications` feature flag 开启时实例化。
+    notification_mailbox_view: Option<ViewHandle<NotificationMailboxView>>,
+    /// 通知 toast 堆(右下角悬浮)。同上 gate 在 `HOANotifications`。
+    notification_toast_stack: Option<ViewHandle<AgentNotificationToastStack>>,
     /// We need to render some dynamic keybindings for our tooltips. These cannot be looked up in the
     /// render method, so look them up when the view is constructed and cache them here. Note that they
     /// need to be kept in sync as the keybindings change.
@@ -2729,6 +2739,55 @@ impl Workspace {
         let agent_toast_stack =
             ctx.add_typed_action_view(|ctx| AgentToastStack::new(Duration::from_secs(4), ctx));
 
+        // 通知中心 mailbox + toast(只在 HOANotifications feature flag 开启时实例化)。
+        let notification_mailbox_view = if FeatureFlag::HOANotifications.is_enabled() {
+            let view = ctx.add_typed_action_view(NotificationMailboxView::new);
+            ctx.subscribe_to_view(&view, move |me, _, event, ctx| match event {
+                NotificationMailboxViewEvent::NavigateToTerminal { terminal_view_id } => {
+                    me.current_workspace_state.is_notification_mailbox_open = false;
+                    me.tab_bar_pinned_by_popup = false;
+                    me.sync_window_button_visibility(ctx);
+                    if let Some(stack) = &me.notification_toast_stack {
+                        stack.update(ctx, |stack, ctx| stack.set_mailbox_open(false, ctx));
+                    }
+                    me.handle_action(
+                        &WorkspaceAction::FocusTerminalViewInWorkspace {
+                            terminal_view_id: *terminal_view_id,
+                        },
+                        ctx,
+                    );
+                    ctx.notify();
+                }
+                NotificationMailboxViewEvent::Dismissed => {
+                    me.current_workspace_state.is_notification_mailbox_open = false;
+                    me.tab_bar_pinned_by_popup = false;
+                    me.sync_window_button_visibility(ctx);
+                    if let Some(stack) = &me.notification_toast_stack {
+                        stack.update(ctx, |stack, ctx| stack.set_mailbox_open(false, ctx));
+                    }
+                    me.focus_active_tab(ctx);
+                    ctx.notify();
+                }
+            });
+            Some(view)
+        } else {
+            None
+        };
+
+        let notification_toast_stack = if FeatureFlag::HOANotifications.is_enabled() {
+            Some(ctx.add_typed_action_view(AgentNotificationToastStack::new))
+        } else {
+            None
+        };
+
+        // 订阅通知 model 事件,以便标题栏 Inbox 按钮上的未读小红点及时刷新。
+        if FeatureFlag::HOANotifications.is_enabled() {
+            ctx.subscribe_to_model(
+                &NotificationsModel::handle(ctx),
+                |_, _, _event, ctx| ctx.notify(),
+            );
+        }
+
         let update_toast_stack =
             ctx.add_typed_action_view(|_| DismissibleToastStack::new(Duration::from_secs(4)));
 
@@ -2925,6 +2984,8 @@ impl Workspace {
             toast_stack,
             agent_toast_stack,
             update_toast_stack,
+            notification_mailbox_view,
+            notification_toast_stack,
             cached_keybindings,
             prompt_editor_modal,
             agent_toolbar_editor_modal,
@@ -16705,7 +16766,13 @@ impl Workspace {
             )
             .finish();
 
-        let unread_count: usize = 0;
+        let unread_count = if FeatureFlag::HOANotifications.is_enabled() {
+            NotificationsModel::as_ref(ctx)
+                .notifications()
+                .filtered_count(NotificationFilter::Unread)
+        } else {
+            0
+        };
         let mailbox_element = if unread_count > 0 {
             let indicator = Container::new(
                 ConstrainedBox::new(
@@ -19601,7 +19668,33 @@ impl TypedActionView for Workspace {
             ToggleVerticalTabsPanel => {
                 self.toggle_vertical_tabs_panel(ctx);
             }
-            ToggleNotificationMailbox { select_first: _ } => {}
+            ToggleNotificationMailbox { select_first } => {
+                if FeatureFlag::HOANotifications.is_enabled()
+                    && *AISettings::as_ref(ctx).show_agent_notifications
+                {
+                    let opening = !self.current_workspace_state.is_notification_mailbox_open;
+                    self.current_workspace_state.is_notification_mailbox_open = opening;
+                    if let Some(stack) = &self.notification_toast_stack {
+                        stack.update(ctx, |stack, ctx| stack.set_mailbox_open(opening, ctx));
+                    }
+                    if opening {
+                        if self.tab_bar_mode(ctx).has_tab_bar() {
+                            self.tab_bar_pinned_by_popup = true;
+                        }
+                        if let Some(view) = &self.notification_mailbox_view {
+                            view.update(ctx, |mailbox, ctx| {
+                                mailbox.reset_for_open(*select_first, ctx);
+                            });
+                            ctx.focus(view);
+                        }
+                    } else {
+                        self.tab_bar_pinned_by_popup = false;
+                        self.sync_window_button_visibility(ctx);
+                        self.focus_active_tab(ctx);
+                    }
+                    ctx.notify();
+                }
+            }
             ToggleVerticalTabsSettingsPopup => {
                 if FeatureFlag::VerticalTabs.is_enabled()
                     && *TabSettings::as_ref(ctx).use_vertical_tabs
@@ -21998,6 +22091,58 @@ impl View for Workspace {
                 ChildView::new(&self.agent_toast_stack).finish(),
                 self.agent_toast_positioning(),
             );
+        }
+
+        // 通知中心浮层:mailbox 下拉面板 + (mailbox 未开时) toast 堆。
+        if FeatureFlag::HOANotifications.is_enabled()
+            && *AISettings::as_ref(app).show_agent_notifications
+        {
+            let mailbox_on_left =
+                Self::is_mailbox_on_left(&TabSettings::as_ref(app).header_toolbar_chip_selection);
+            let (mailbox_anchor, mailbox_child_anchor) = if mailbox_on_left {
+                (PositionedElementAnchor::BottomLeft, ChildAnchor::TopLeft)
+            } else {
+                (PositionedElementAnchor::BottomRight, ChildAnchor::TopRight)
+            };
+
+            if self.current_workspace_state.is_notification_mailbox_open {
+                if let Some(view) = &self.notification_mailbox_view {
+                    stack.add_positioned_overlay_child(
+                        ChildView::new(view).finish(),
+                        OffsetPositioning::offset_from_save_position_element(
+                            NOTIFICATIONS_MAILBOX_POSITION_ID,
+                            Vector2F::zero(),
+                            PositionedElementOffsetBounds::WindowByPosition,
+                            mailbox_anchor,
+                            mailbox_child_anchor,
+                        ),
+                    );
+                }
+            } else if let Some(stack_view) = &self.notification_toast_stack {
+                let (toast_anchor, toast_child_anchor, offset_x) = if mailbox_on_left {
+                    (
+                        PositionedElementAnchor::BottomLeft,
+                        ChildAnchor::TopLeft,
+                        WORKSPACE_PADDING,
+                    )
+                } else {
+                    (
+                        PositionedElementAnchor::BottomRight,
+                        ChildAnchor::TopRight,
+                        -WORKSPACE_PADDING,
+                    )
+                };
+                stack.add_positioned_overlay_child(
+                    ChildView::new(stack_view).finish(),
+                    OffsetPositioning::offset_from_save_position_element(
+                        TAB_BAR_POSITION_ID,
+                        vec2f(offset_x, 4.),
+                        PositionedElementOffsetBounds::WindowByPosition,
+                        toast_anchor,
+                        toast_child_anchor,
+                    ),
+                );
+            }
         }
 
         if let Some(input_position_id) = input_position_id {
