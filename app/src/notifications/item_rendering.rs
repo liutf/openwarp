@@ -11,7 +11,7 @@ use warpui::elements::{
 };
 use warpui::fonts::Weight;
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
-use warpui::{View, ViewContext, ViewHandle};
+use warpui::{SingletonEntity, View, ViewContext, ViewHandle};
 
 use warp_core::ui::appearance::Appearance as CoreAppearance;
 use warp_core::ui::theme::color::internal_colors;
@@ -463,15 +463,24 @@ pub(crate) fn handle_notification_artifact_buttons_event(
     ctx: &mut ViewContext<impl View>,
 ) {
     match event {
-        ArtifactButtonsRowEvent::OpenPlan { notebook_uid } => {
+        ArtifactButtonsRowEvent::OpenPlan { document_uid } => {
             send_telemetry_from_ctx!(
                 NotificationsTelemetryEvent::ArtifactClicked {
                     artifact_type: ArtifactType::Plan
                 },
                 ctx
             );
-            ctx.dispatch_typed_action(&WorkspaceAction::OpenNotebook {
-                id: (*notebook_uid).into(),
+            // openWarp 本地化:点击 plan 按钮打开本地 AIDocument pane,
+            // 不再跳到云 notebook 镜像。
+            let document_version = crate::ai::document::ai_document_model::AIDocumentModel::as_ref(
+                ctx,
+            )
+            .get_current_document(document_uid)
+            .map(|doc| doc.version)
+            .unwrap_or_default();
+            ctx.dispatch_typed_action(&WorkspaceAction::OpenAIDocumentPane {
+                document_id: *document_uid,
+                document_version,
             });
         }
         ArtifactButtonsRowEvent::CopyBranch { branch } => {

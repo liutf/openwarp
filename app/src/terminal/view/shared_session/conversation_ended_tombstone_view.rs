@@ -5,7 +5,6 @@ use crate::ai::ambient_agents::{
 use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
 use crate::ai::blocklist::{format_credits, BlocklistAIHistoryModel};
 use crate::appearance::Appearance;
-use crate::server::ids::SyncId;
 use crate::settings::ai::{AISettings, AISettingsChangedEvent};
 use crate::ui_components::blended_colors;
 use crate::util::time_format::human_readable_precise_duration;
@@ -243,9 +242,17 @@ impl ConversationEndedTombstoneView {
         ctx.subscribe_to_view(
             &view.artifact_buttons_view,
             |_, _, event, ctx| match event {
-                ArtifactButtonsRowEvent::OpenPlan { notebook_uid } => {
-                    ctx.dispatch_typed_action(&WorkspaceAction::OpenNotebook {
-                        id: SyncId::ServerId((*notebook_uid).into()),
+                ArtifactButtonsRowEvent::OpenPlan { document_uid } => {
+                    // openWarp 本地化:在 shared session tombstone 中同样走本地
+                    // AIDocument pane,不再依赖云 notebook_uid。
+                    let document_version =
+                        crate::ai::document::ai_document_model::AIDocumentModel::as_ref(ctx)
+                            .get_current_document(document_uid)
+                            .map(|doc| doc.version)
+                            .unwrap_or_default();
+                    ctx.dispatch_typed_action(&WorkspaceAction::OpenAIDocumentPane {
+                        document_id: *document_uid,
+                        document_version,
                     });
                 }
                 ArtifactButtonsRowEvent::CopyBranch { branch } => {
