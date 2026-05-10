@@ -27,8 +27,10 @@ on:
 
 # 创建 release + 上传 asset 需要写权限。默认 GITHUB_TOKEN 在 fork/受限仓库下是只读,
 # 这里显式声明 contents: write 兜底 403 "Resource not accessible by integration"。
+# actions: write 用于 publish_release 末尾删除本次 run 的 workflow artifact(释放 Actions storage)。
 permissions:
   contents: write
+  actions: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -256,3 +258,20 @@ jobs:
           make_latest: "true"
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 发布成功后立刻删本次 run 的 workflow artifact,释放 Actions storage 配额。
+      # 安装包已经挂到 GitHub Release(独立存储,不占 Actions storage),
+      # workflow artifact 只是 build job → publish job 的中间传递管道,留着没用。
+      # 仅在 Release 创建成功后执行(if: success()),失败保留 artifact 方便复盘。
+      - name: Delete workflow artifacts to free Actions storage
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ids=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --jq '.artifacts[].id')
+          for id in $ids; do
+            echo "Deleting artifact $id"
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id"
+          done
+        shell: bash
