@@ -16,14 +16,14 @@ use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::ui_components::keyboard_shortcut::KeyboardShortcut;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
+use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
+use crate::appearance::Appearance;
 use crate::notifications::item_rendering::{
     create_notification_artifact_buttons_view, handle_notification_artifact_buttons_event,
     render_notification_item_content, NotificationRenderContext, OnExpandClick,
 };
 use crate::notifications::model::{NotificationsEvent, NotificationsModel};
 use crate::notifications::{NotificationId, NotificationItem};
-use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
-use crate::appearance::Appearance;
 use crate::terminal::session_settings::SessionSettings;
 use crate::util::bindings::keybinding_name_to_keystroke;
 use crate::workspace::view::JUMP_TO_LATEST_TOAST_BINDING_NAME;

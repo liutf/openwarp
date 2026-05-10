@@ -14,6 +14,8 @@ use warpui::platform::Cursor;
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
+use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
+use crate::appearance::Appearance;
 use crate::notifications::item::NotificationFilter;
 use crate::notifications::item_rendering::{
     create_notification_artifact_buttons_view, handle_notification_artifact_buttons_event,
@@ -21,8 +23,6 @@ use crate::notifications::item_rendering::{
 };
 use crate::notifications::model::{NotificationsEvent, NotificationsModel};
 use crate::notifications::{NotificationId, NotificationItem, NotificationItems};
-use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
-use crate::appearance::Appearance;
 use crate::ui_components::icons::Icon;
 use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
 

@@ -2782,10 +2782,9 @@ impl Workspace {
 
         // 订阅通知 model 事件,以便标题栏 Inbox 按钮上的未读小红点及时刷新。
         if FeatureFlag::HOANotifications.is_enabled() {
-            ctx.subscribe_to_model(
-                &NotificationsModel::handle(ctx),
-                |_, _, _event, ctx| ctx.notify(),
-            );
+            ctx.subscribe_to_model(&NotificationsModel::handle(ctx), |_, _, _event, ctx| {
+                ctx.notify()
+            });
         }
 
         let update_toast_stack =

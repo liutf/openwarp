@@ -615,3 +615,47 @@ fn test_should_update() {
         });
     });
 }
+
+/// openWarp(Channel::Oss)下 `ChannelState::app_version()` 保留 `v` 前缀,
+/// 而 `github::GithubRelease::version()` 已经 trim 掉 `v`。`should_update`
+/// 必须能识别这种"同版本但前缀不同"的情形为 `UpdateReady::No`,
+/// 否则关于页会永远提示"发现新版本"。
+#[test]
+fn test_should_update_normalizes_v_prefix_for_openwarp() {
+    App::test((), |mut app| async move {
+        app.add_singleton_model(|ctx| AppExecutionMode::new(ExecutionMode::App, false, ctx));
+        let autoupdate_state = initialize_app(&mut app);
+
+        app.update_model(&autoupdate_state, |autoupdate, _| {
+            // 模拟 openWarp 现场:
+            // - 本地 GIT_RELEASE_TAG = "v2026.05.10.preview"
+            // - GitHub release tag = "v2026.05.10.preview",`GithubRelease::version()` 返回 "2026.05.10.preview"
+            ChannelState::set_app_version(Some("v2026.05.10.preview"));
+            let version = make_version_info("2026.05.10.preview", false);
+
+            let result = autoupdate.should_update(version, "oss_same_version".to_string());
+            assert!(
+                matches!(result, UpdateReady::No),
+                "openWarp 两边仅 v 前缀差异时应识别为已是最新,实际: {result:?}"
+            );
+
+            // 反向 sanity check:本地不带 v、远端带 v 也应同样被识别为同版本。
+            ChannelState::set_app_version(Some("2026.05.10.preview"));
+            let version = make_version_info("v2026.05.10.preview", false);
+            let result = autoupdate.should_update(version, "oss_same_version_2".to_string());
+            assert!(
+                matches!(result, UpdateReady::No),
+                "反向前缀差异时同样应识别为已是最新,实际: {result:?}"
+            );
+
+            // 不同版本仍需能正确识别为可更新(不被归一化误伤)。
+            ChannelState::set_app_version(Some("v2026.05.10.preview"));
+            let version = make_version_info("2026.05.11.preview", false);
+            let result = autoupdate.should_update(version, "oss_new_version".to_string());
+            assert!(
+                matches!(result, UpdateReady::CanDownload { .. }),
+                "不同版本应识别为 CanDownload,实际: {result:?}"
+            );
+        });
+    });
+}

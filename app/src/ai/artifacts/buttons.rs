@@ -55,11 +55,21 @@ impl ArtifactButtonsRow {
 
 pub enum ArtifactButtonsRowEvent {
     /// openWarp 本地化:点击 plan 按钮走本地 AIDocumentId,不再依赖云 notebook 镜像。
-    OpenPlan { document_uid: AIDocumentId },
-    CopyBranch { branch: String },
-    OpenPullRequest { url: String },
-    ViewScreenshots { artifact_uids: Vec<String> },
-    DownloadFile { artifact_uid: String },
+    OpenPlan {
+        document_uid: AIDocumentId,
+    },
+    CopyBranch {
+        branch: String,
+    },
+    OpenPullRequest {
+        url: String,
+    },
+    ViewScreenshots {
+        artifact_uids: Vec<String>,
+    },
+    DownloadFile {
+        artifact_uid: String,
+    },
 }
 
 #[derive(Debug, Clone)]

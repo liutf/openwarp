@@ -308,7 +308,14 @@ impl AutoupdateState {
             download.version.update_by = version.update_by;
         }
 
-        if version.version == current_version {
+        // openWarp 注:`ChannelState::app_version()` 返回的是注入的 `GIT_RELEASE_TAG`
+        // 原值,**保留** `v` 前缀(如 `v2026.05.10.preview`);而 `VersionInfo.version`
+        // 在 OSS 分支由 `github::GithubRelease::version()` 提供,已经 `trim_start_matches('v')`
+        // 去掉了 `v`(如 `2026.05.10.preview`)。直接做字符串相等比较会永远 false,导致
+        // "已是最新"被错判为"发现新版本"。这里做幂等的前缀归一化:
+        // - 官方 Warp:tag 一律带 `v`,两边 trim 后仍相等,行为不变。
+        // - openWarp:trim 后才相等,正确识别同版本。
+        if version.version.trim_start_matches('v') == current_version.trim_start_matches('v') {
             log::info!("Already up to date with {}", version.version);
             UpdateReady::No
         } else {

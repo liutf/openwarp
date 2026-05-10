@@ -150,9 +150,8 @@ impl DetailsBar {
                 Mode::Editing => crate::t!("common-tooltip-exit-edit-mode"),
             };
             let ui_builder = appearance.ui_builder().clone();
-            edit_button = edit_button.with_tooltip(move || {
-                ui_builder.tool_tip(tooltip_text.clone()).build().finish()
-            });
+            edit_button = edit_button
+                .with_tooltip(move || ui_builder.tool_tip(tooltip_text.clone()).build().finish());
         }
 
         Container::new(

@@ -472,12 +472,11 @@ pub(crate) fn handle_notification_artifact_buttons_event(
             );
             // openWarp 本地化:点击 plan 按钮打开本地 AIDocument pane,
             // 不再跳到云 notebook 镜像。
-            let document_version = crate::ai::document::ai_document_model::AIDocumentModel::as_ref(
-                ctx,
-            )
-            .get_current_document(document_uid)
-            .map(|doc| doc.version)
-            .unwrap_or_default();
+            let document_version =
+                crate::ai::document::ai_document_model::AIDocumentModel::as_ref(ctx)
+                    .get_current_document(document_uid)
+                    .map(|doc| doc.version)
+                    .unwrap_or_default();
             ctx.dispatch_typed_action(&WorkspaceAction::OpenAIDocumentPane {
                 document_id: *document_uid,
                 document_version,
