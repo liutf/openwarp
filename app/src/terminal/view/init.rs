@@ -163,13 +163,13 @@ pub fn init(app: &mut AppContext) {
         FixedBinding::new(
             "pageup",
             TerminalAction::PageUp,
-            id!("Terminal") & !id!("IMEOpen"),
+            id!("Terminal") & !id!("IMEOpen") & !id!("EditorFocused"),
         )
         .with_command_description(crate::t!("keybinding-desc-terminal-scroll-up-one-page")),
         FixedBinding::new(
             "pagedown",
             TerminalAction::PageDown,
-            id!("Terminal") & !id!("IMEOpen"),
+            id!("Terminal") & !id!("IMEOpen") & !id!("EditorFocused"),
         )
         .with_command_description(crate::t!("keybinding-desc-terminal-scroll-down-one-page")),
         // Resume conversation keybinding

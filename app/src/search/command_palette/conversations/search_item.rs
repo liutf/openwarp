@@ -413,11 +413,9 @@ impl SearchItem for ConversationSearchItem {
     fn accessibility_label(&self) -> String {
         match &self.action_info {
             ConversationAction::Resume(matched_conversation) => {
-                format!(
-                    "{}: {}",
-                    crate::t!("workspace-conversation-list-fallback-title"),
-                    matched_conversation.as_ref().conversation.title()
-                )
+                let fallback_title = crate::t!("workspace-conversation-list-fallback-title");
+                let title = matched_conversation.as_ref().conversation.title();
+                format!("{fallback_title}: {title}")
             }
             ConversationAction::Fork { title, .. } => {
                 crate::t!(
@@ -431,11 +429,11 @@ impl SearchItem for ConversationSearchItem {
 
     fn accessibility_help_message(&self) -> Option<String> {
         match &self.action_info {
-            ConversationAction::Resume(matched_conversation) => Some(format!(
-                "{} \"{}\".",
-                crate::t!("command-palette-conversations-a11y-navigate"),
-                matched_conversation.as_ref().conversation.title()
-            )),
+            ConversationAction::Resume(matched_conversation) => {
+                let navigate = crate::t!("command-palette-conversations-a11y-navigate");
+                let title = matched_conversation.as_ref().conversation.title();
+                Some(format!("{navigate} \"{title}\"."))
+            }
             ConversationAction::Fork { .. } => {
                 Some(crate::t!("command-palette-conversations-a11y-fork"))
             }
