@@ -16712,7 +16712,7 @@ impl Workspace {
                         Shrinkable::new(
                             1.,
                             Text::new_inline(
-                                "Search sessions, agents, files...",
+                                crate::t!("workspace-title-bar-search-placeholder"),
                                 appearance.ui_font_family(),
                                 14.,
                             )
