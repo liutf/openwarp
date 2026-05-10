@@ -1958,6 +1958,19 @@ impl WorkflowView {
                         .build()
                         .finish()
                 });
+            } else {
+                // openWarp UX: 与 notebook details_bar 一致,给 workflow 编辑
+                // 切换按钮加 tooltip,避免用户不知道这个铅笔能点、
+                // 点了会发生什么。Tooltip 表达「点击后会发生的动作」。
+                let tooltip_text = match self.workflow_view_mode {
+                    WorkflowViewMode::View => crate::t!("common-tooltip-enter-edit-mode"),
+                    WorkflowViewMode::Edit => crate::t!("common-tooltip-exit-edit-mode"),
+                    _ => crate::t!("common-tooltip-enter-edit-mode"),
+                };
+                let ui_builder = appearance.ui_builder().clone();
+                edit_button = edit_button.with_tooltip(move || {
+                    ui_builder.tool_tip(tooltip_text.clone()).build().finish()
+                });
             }
             let edit_button = edit_button.build();
 
