@@ -56,6 +56,12 @@ embed_plist::embed_info_plist_bytes!(r#"
     <string>dev.openwarp.OpenWarp</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+    <string>en</string>
+    <string>ja</string>
+    <string>zh-CN</string>
+    </array>
     <key>CFBundleName</key>
     <string>OpenWarp</string>
     <key>CFBundlePackageType</key>
