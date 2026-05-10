@@ -865,9 +865,11 @@ impl BlockList {
         // 地方。但 gap 只能随 "gap 之后总高度" 的增量收缩,而那些 0 高度 block
         // 贡献不了增量,导致 gap 无法被收缩 → 用户输入的命令 block 始终在屏幕外。
         //
-        // 修复:如果 active block 还没准备好 (height=0 + BeforeExecution + 未 started),
+        // 修复:如果 active block 还没准备好且此刻仍有 in-band 命令在飞(height=0 +
+        // BeforeExecution + !in_band 本身 + in_flight_in_band_command_count > 0),
         // 记下 pending。等下次 `precmd` 到达 (意味着远端 prompt 已重画、active
-        // block 有真正内容) 时再执行清屏。
+        // block 有真正内容) 时再执行清屏。本地常态(无 in-band 命令在飞)不进
+        // 该分支,避免本地 Ctrl+L 被误拦。
         if self.should_defer_clear_for_unprepared_active_block() {
             log::info!(
                 "[ctrl-l] deferring clear_visible_screen until active block has a prompt; \
@@ -883,7 +885,16 @@ impl BlockList {
 
     /// active block 是否是"刚创建、prompt 还没到"的状态。这种状态下不应该允许
     /// `clear_visible_screen` 走进去,否则会在 sum tree 上留下一排 height=0 block。
+    ///
+    /// 注意:仅当 in-band 命令仍在飞行(典型如 SSH subshell-bootstrap 期间高频派发的
+    /// generator)时才走 defer 路径。否则 `height=0 + BeforeExecution + !in_band` 实际是
+    /// 本地 shell 空 prompt 等待用户输入的**默认态**,会把所有本地 Ctrl+L 误拦截、
+    /// 设成 pending 后永远等不到 precmd 兜底,表现为本地清屏失效(SSH 远端反而正常,
+    /// 因其 active block 已绘出远端 prompt,height > 0 直接绕过此判定)。
     fn should_defer_clear_for_unprepared_active_block(&self) -> bool {
+        if self.in_flight_in_band_command_count == 0 {
+            return false;
+        }
         let block = self.active_block();
         // height=0 代表尚未绘出 prompt;BeforeExecution 代表还没开始执行;
         // 不取 `started()` 是因为他看的是命令是否开始,与 prompt 到达状态不同步。
