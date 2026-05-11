@@ -174,7 +174,6 @@ app-menu-preferences = 偏好设置
 app-menu-privacy-policy = 隐私政策...
 app-menu-debug = 调试
 app-menu-set-default-terminal = 将 Warp 设为默认终端
-app-menu-log-out = 退出登录
 app-menu-file = 文件
 app-menu-edit = 编辑
 app-menu-use-warp-prompt = 使用 Warp 提示符

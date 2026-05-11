@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::fs::File;
 
-use crate::auth::AuthStateProvider;
 use crate::default_terminal::DefaultTerminal;
 use crate::features::{runtime_flags_menu_items, FeatureFlag};
 use crate::root_view::OpenLaunchConfigArg;
@@ -17,7 +16,7 @@ use crate::user_config::WarpConfig;
 use crate::util::bindings::{self, trigger_to_keystroke, CustomAction};
 use crate::util::links;
 use crate::workspace::sync_inputs::SyncedInputState;
-use crate::{auth, report_if_error};
+use crate::{report_if_error};
 use csv::Writer;
 use enclose::enclose;
 use settings::manager::SettingsManager;
@@ -193,22 +192,6 @@ fn make_new_app_menu(ctx: &AppContext) -> Menu {
                     !DefaultTerminal::can_warp_become_default()
                         || default_terminal.is_warp_default(),
                 ),
-                ..Default::default()
-            }
-        },
-        None,
-    )));
-    menu_items.push(MenuItem::Separator);
-    menu_items.push(MenuItem::Custom(CustomMenuItem::new(
-        &crate::t!("app-menu-log-out"),
-        auth::maybe_log_out,
-        move |_, ctx| {
-            let is_anonymous = AuthStateProvider::handle(ctx)
-                .as_ref(ctx)
-                .get()
-                .is_anonymous_or_logged_out();
-            MenuItemPropertyChanges {
-                disabled: Some(is_anonymous),
                 ..Default::default()
             }
         },

@@ -181,7 +181,6 @@ app-menu-preferences = Preferences
 app-menu-privacy-policy = Privacy Policy...
 app-menu-debug = Debug
 app-menu-set-default-terminal = Set Warp as Default Terminal
-app-menu-log-out = Log out
 app-menu-file = File
 app-menu-edit = Edit
 app-menu-use-warp-prompt = Use Warp's Prompt
