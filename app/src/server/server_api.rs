@@ -17,27 +17,20 @@ use crate::ai::voice::transcribe::{TranscribeRequest, TranscribeResponse};
 use crate::auth::AuthManager;
 use crate::auth::AuthState;
 use crate::server::graphql::default_request_options;
-use crate::server::server_api::presigned_upload::HttpStatusError;
 use ai::AIClient;
-use base64::prelude::BASE64_URL_SAFE;
-use base64::Engine;
 use block::BlockClient;
 use channel_versions::ChannelVersions;
 use futures::StreamExt;
 use object::ObjectClient;
-use prost::Message;
 use referral::ReferralsClient;
 use url::Url;
 use warp_core::errors::{register_error, AnyhowErrorExt, ErrorExt};
 use warp_managed_secrets::client::ManagedSecretsClient;
 use warpui::{r#async::BoxFuture, ModelContext};
 
-/// Header key for the ambient workload token attached to multi-agent requests.
-///
-/// OpenWarp Wave 3-1:常量原定义在 `server_api/auth.rs`,该文件整文件物理删后
-/// 直接迁入本文件,运行时不再有云端 ambient workload token 发签,header 注入路径
-/// 始终走 `None` 分支。
-pub const AMBIENT_WORKLOAD_TOKEN_HEADER: &str = "X-Warp-Ambient-Workload-Token";
+// OpenWarp Wave 5-3:原 `AMBIENT_WORKLOAD_TOKEN_HEADER` 随 `generate_multi_agent_output` 云端
+// SSE 路径 stub 化后在全仓库 0 消费,物理删。`get_or_create_ambient_workload_token`
+// 在 W3-1 后永返 `None`,代码中不再有 header 注入点。
 
 /// Header key for the cloud agent task ID attached to requests from ambient agents.
 pub const CLOUD_AGENT_ID_HEADER: &str = "X-Warp-Cloud-Agent-ID";
@@ -47,7 +40,7 @@ use crate::settings_view;
 
 use crate::ChannelState;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 use instant::Instant;
 use parking_lot::{Mutex, RwLock};
@@ -610,244 +603,32 @@ impl ServerApi {
         })
     }
 
-    /// Sends a GET request to a public API endpoint.
-    ///
-    /// # Arguments
-    /// * `path` - Endpoint path relative to `/api/v1` (e.g., "agent/tasks/{task_id}")
-    async fn get_public_api<R>(&self, path: &str) -> Result<R>
-    where
-        R: serde::de::DeserializeOwned,
-    {
-        let response = self.get_public_api_response(path).await?;
-        let url = response.url().clone();
-        response
-            .json::<R>()
-            .await
-            .with_context(|| format!("Failed to deserialize response from {url}"))
-    }
-
-    /// Sends a GET request to a public API endpoint and returns the raw response on success.
-    ///
-    /// Unlike [`get_public_api`], this does not attempt JSON deserialization on the
-    /// response body, allowing the caller to decode it however they need.
-    async fn get_public_api_response(&self, path: &str) -> Result<http_client::Response> {
-        let auth_token = self
-            .get_or_refresh_access_token()
-            .await
-            .context("Failed to get access token for API request")?;
-
-        let url = format!("{}/api/v1/{}", ChannelState::server_root_url(), path);
-
-        let mut request = self.client.get(&url);
-        if let Some(token) = auth_token.as_bearer_token() {
-            request = request.bearer_auth(token);
-        }
-
-        for (name, value) in self.ambient_agent_headers() {
-            request = request.header(name, value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .with_context(|| format!("Failed to send API request to {url}"))?;
-
-        if response.status().is_success() {
-            Ok(response)
-        } else {
-            // Put `HttpStatusError` in the error chain so shared retry classifiers
-            // (`is_transient_http_error`) can distinguish transient 5xx / 408 / 429
-            // from permanent 4xx without string-matching the Display output.
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            let status_err = HttpStatusError {
-                status: status.as_u16(),
-                body: body.clone(),
-            };
-            match serde_json::from_str::<ClientError>(&body) {
-                Ok(error_response) => {
-                    Err(anyhow::Error::new(status_err).context(error_response.error))
-                }
-                Err(_) => Err(anyhow::Error::new(status_err)
-                    .context(format!("API request failed with status {status}"))),
-            }
-        }
-    }
-
     /// Opens an SSE stream to the agent event-push endpoint.
     ///
-    /// The returned `EventSourceStream` yields `reqwest_eventsource::Event`
-    /// items until the connection closes or an error occurs. The caller is
-    /// responsible for reading the stream and handling reconnection.
-    ///
-    /// The stream is served by warp-server-rtc (not the main warp-server pool),
-    /// so the URL is built from `ChannelState::rtc_http_url()` rather than
-    /// `server_root_url()`.
+    /// OpenWarp Wave 5-3:本方法原走 RTC 云端 SSE 端点 (`rtc_http_url()/api/v1/agent/events/stream`)
+    /// 用于接收 cloud agent run 的事件推送。OpenWarp 已剩离云端 RTC pool,该 URL
+    /// 不可达 — 直接 stub 返回错误。两个消费方都 graceful 处理 Err:
+    /// - `ai/agent_sdk/ambient.rs:949`: 重连 retry 退避到最大重试后上抓,initial 连接
+    ///   失败直接传播 Err
+    /// - `ai/agent_events/driver.rs:126`: `.await?` 立即向上传播
     pub async fn stream_agent_events(
         &self,
-        run_ids: &[String],
-        since_sequence: i64,
+        _run_ids: &[String],
+        _since_sequence: i64,
     ) -> Result<http_client::EventSourceStream> {
-        debug_assert!(!run_ids.is_empty(), "run_ids must not be empty");
-        let auth_token = self
-            .get_or_refresh_access_token()
-            .await
-            .context("Failed to get access token for SSE stream")?;
-
-        let run_ids_param: String = run_ids
-            .iter()
-            .map(|id| format!("run_ids[]={}", urlencoding::encode(id)))
-            .collect::<Vec<_>>()
-            .join("&");
-        let url = format!(
-            "{}/api/v1/agent/events/stream?{run_ids_param}&since={since_sequence}",
-            ChannelState::rtc_http_url()
-        );
-
-        let mut request = self.client.get(&url);
-        if let Some(token) = auth_token.as_bearer_token() {
-            request = request.bearer_auth(token);
-        }
-
-        for (name, value) in self.ambient_agent_headers() {
-            request = request.header(name, value);
-        }
-
-        Ok(request.eventsource())
+        Err(anyhow!(
+            "Cloud agent event stream disabled in OpenWarp — RTC endpoint is removed"
+        ))
     }
 
-    /// Sends a POST request to a public API endpoint and returns the raw response on success.
-    async fn post_public_api_response<B>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<http_client::Response>
-    where
-        B: Serialize,
-    {
-        let auth_token = self
-            .get_or_refresh_access_token()
-            .await
-            .context("Failed to get access token for API request")?;
-
-        let url = format!("{}/api/v1/{}", ChannelState::server_root_url(), path);
-
-        let mut request = self.client.post(&url).json(body);
-        if let Some(token) = auth_token.as_bearer_token() {
-            request = request.bearer_auth(token);
-        }
-
-        for (name, value) in self.ambient_agent_headers() {
-            request = request.header(name, value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .with_context(|| format!("Failed to send API request to {url}"))?;
-
-        if response.status().is_success() {
-            Ok(response)
-        } else {
-            Err(Self::error_from_response(response).await)
-        }
-    }
-
-    /// Converts a non-success public API response into the most specific client error available.
-    async fn error_from_response(response: http_client::Response) -> anyhow::Error {
-        let status = response.status();
-        let is_at_capacity = response
-            .headers()
-            .get(WARP_ERROR_CODE_HEADER)
-            .and_then(|v| v.to_str().ok())
-            == Some(WARP_ERROR_CODE_AT_CAPACITY);
-        let is_out_of_credits = response
-            .headers()
-            .get(WARP_ERROR_CODE_HEADER)
-            .and_then(|v| v.to_str().ok())
-            == Some(WARP_ERROR_CODE_OUT_OF_CREDITS);
-
-        // Get the response text first since we may need to try multiple deserializations.
-        let response_text = response.text().await.unwrap_or_default();
-
-        // Check for AT_CAPACITY error code header.
-        if is_at_capacity {
-            if let Ok(capacity_error) =
-                serde_json::from_str::<CloudAgentCapacityError>(&response_text)
-            {
-                return capacity_error.into();
-            }
-        }
-        if status == StatusCode::TOO_MANY_REQUESTS && is_out_of_credits {
-            return AIApiError::QuotaLimit.into();
-        }
-
-        // Try to deserialize error response as { "error": "message" }
-        match serde_json::from_str::<ClientError>(&response_text) {
-            Ok(error_response) => error_response.into(),
-            Err(_) => anyhow!("API request failed with status {status}"),
-        }
-    }
-
-    /// Sends a POST request to a public API endpoint.
-    ///
-    /// # Arguments
-    /// * `path` - Endpoint path relative to `/api/v1` (e.g., "agent/run")
-    /// * `body` - Request body to serialize as JSON
-    async fn post_public_api<B, R>(&self, path: &str, body: &B) -> Result<R>
-    where
-        B: Serialize,
-        R: serde::de::DeserializeOwned,
-    {
-        let response = self.post_public_api_response(path, body).await?;
-        let url = response.url().clone();
-        response
-            .json::<R>()
-            .await
-            .with_context(|| format!("Failed to deserialize response from {url}"))
-    }
-
-    /// Sends a POST request to a public API endpoint that returns no response body.
-    async fn post_public_api_unit<B>(&self, path: &str, body: &B) -> Result<()>
-    where
-        B: Serialize,
-    {
-        self.post_public_api_response(path, body).await?;
-        Ok(())
-    }
-
-    /// Sends a PATCH request to a public API endpoint that returns no response body.
-    async fn patch_public_api_unit<B>(&self, path: &str, body: &B) -> Result<()>
-    where
-        B: Serialize,
-    {
-        let auth_token = self
-            .get_or_refresh_access_token()
-            .await
-            .context("Failed to get access token for API request")?;
-
-        let url = format!("{}/api/v1/{}", ChannelState::server_root_url(), path);
-
-        let mut request = self.client.patch(&url).json(body);
-        if let Some(token) = auth_token.as_bearer_token() {
-            request = request.bearer_auth(token);
-        }
-
-        for (name, value) in self.ambient_agent_headers() {
-            request = request.header(name, value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .with_context(|| format!("Failed to send API request to {url}"))?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(Self::error_from_response(response).await)
-        }
-    }
+    // OpenWarp Wave 5-3:`get_public_api` / `get_public_api_response` /
+    // `post_public_api` / `post_public_api_response` / `post_public_api_unit` /
+    // `patch_public_api_unit` / `error_from_response` 七个 private helper 原为
+    // /api/v1/* HTTP REST 调用准备,server_api/* 8 个文件 stub 化后 0 外部消费,
+    // 整体物理删。需要权限代理 / X-Warp 错误码 / HttpStatusError 包装的 BYOP
+    // 路径依然会走 `send_graphql_request`(BYOP OAuth + cloud env image fetch),同路径与
+    // public-api 拆开。本次顺手删除 `HttpStatusError` 在 server_api.rs 内唯一
+    // 消费点后,外部 `presigned_upload.rs` 仅作为错误类型保留本体,import 需同步删。
 
     // OpenWarp Wave 4-1:`notify_login` (原向 /client/login 发生命令心跳) 0 消费方，物理删。
 
@@ -890,94 +671,37 @@ impl ServerApi {
 
     pub async fn generate_multi_agent_output(
         &self,
-        request: &warp_multi_agent_api::Request,
+        _request: &warp_multi_agent_api::Request,
     ) -> std::result::Result<AIOutputStream<warp_multi_agent_api::ResponseEvent>, Arc<AIApiError>>
     {
-        let auth_token = self
-            .get_or_refresh_access_token()
-            .await
-            .map_err(Into::into)
-            .map_err(Arc::new)?;
-
-        let is_passive = request.input.as_ref().is_some_and(|input| {
-            matches!(
-                input.r#type,
-                Some(warp_multi_agent_api::request::input::Type::GeneratePassiveSuggestions(_))
-            )
+        // OpenWarp Wave 5-3:`generate_multi_agent_output` 是云端 agent SSE 端点
+        // (`/ai/multi-agent` 与 `/ai/passive-suggestions`) 的唯一入口。OpenWarp 主走
+        // BYOP 路径(`crate::ai::agent_providers::chat_stream::generate_byop_output`),
+        // 本方法仅在 `byop_dispatch_info` 返回 `None` 时被调用作为 fallback,
+        // 但云端已剩离,fallback 会被 dns 拒绝 / 404 拒绝 — 直接 stub
+        // 为返回 `Disabled` 错误流。
+        //
+        // 所有消费点都通过 `take_until(cancellation_rx)` 或 channel 包装
+        // graceful 处理 stream Err:
+        // - `ai/agent/api/impl.rs:139` -> err event 走 channel
+        // - `blocklist/controller/response_stream.rs:269/375` -> response_stream_result
+        //   会走 retry/error handling
+        // - `blocklist/passive_suggestions/maa.rs:177` -> passive suggestion 提取到 None
+        //   后静默退出
+        //
+        // BYOP 主路径已配 provider 用户 → 不受影响(走不到本方法)。
+        // 未配 BYOP 用户 → 立即报错而非超时拒绝,UX 改进。
+        log::debug!("generate_multi_agent_output disabled in OpenWarp (BYOP-only)");
+        let error_stream = futures::stream::once(async {
+            Err(Arc::new(AIApiError::Other(anyhow!(
+                "Cloud multi-agent endpoint disabled in OpenWarp — configure a BYOP provider in Settings"
+            ))))
         });
-        let is_evals = cfg!(feature = "agent_mode_evals");
-        let url = format!(
-            "{}/{}/{}",
-            ChannelState::server_root_url(),
-            if is_evals { "agent-mode-evals" } else { "ai" },
-            if is_passive {
-                "passive-suggestions"
-            } else {
-                "multi-agent"
-            }
-        );
-
-        let ambient_workload_token = self
-            .get_or_create_ambient_workload_token()
-            .await
-            .map_err(Into::into)
-            .map_err(Arc::new)?;
-
-        let mut request_builder = self
-            .client
-            .post(url)
-            .proto(request)
-            .prevent_sleep("Agent Mode request in-progress");
-        if let Some(token) = auth_token.as_bearer_token() {
-            request_builder = request_builder.bearer_auth(token);
-        }
-
-        if let Some(token) = ambient_workload_token {
-            request_builder = request_builder.header(AMBIENT_WORKLOAD_TOKEN_HEADER, token);
-        }
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "agent_mode_evals")] {
-                let mut request = request_builder;
-                if let Some(eval_user_id) = self.eval_user_id {
-                    request = request.header(EVAL_USER_ID_HEADER, eval_user_id.to_string());
-                }
-            } else {
-                let request = request_builder;
-            }
-        }
-
-        let output_stream = request.eventsource().filter_map(|event| async {
-            let result = match event {
-                Ok(reqwest_eventsource::Event::Message(message_event)) => {
-                    match BASE64_URL_SAFE.decode(message_event.data.trim_matches('"')) {
-                        Ok(decoded_data) => {
-                            let action = warp_multi_agent_api::ResponseEvent::decode(
-                                decoded_data.as_slice(),
-                            );
-                            Some(action.map_err(|e| AIApiError::Other(anyhow::Error::from(e))))
-                        }
-                        Err(e) => Some(Err(AIApiError::Other(anyhow::Error::from(e)))),
-                    }
-                }
-                Ok(reqwest_eventsource::Event::Open) => None,
-                Err(err) => Some(Err(AIApiError::from_stream_error(
-                    "GenerateMultiAgentOutput",
-                    err,
-                )
-                .await)),
-            }
-            // Wrap errors in an Arc so that they're cloneable by downstream event
-            // handlers.
-            .map(|item| item.map_err(Arc::new));
-            result
-        });
-
         cfg_if::cfg_if! {
             if #[cfg(target_family = "wasm")] {
-                Ok(output_stream.boxed_local())
+                Ok(error_stream.boxed_local())
             } else {
-                Ok(output_stream.boxed())
+                Ok(error_stream.boxed())
             }
         }
     }
