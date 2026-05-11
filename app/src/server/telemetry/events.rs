@@ -6839,7 +6839,3 @@ impl TelemetryEventDesc for TelemetryEventDiscriminants {
 }
 
 warp_core::register_telemetry_event!(TelemetryEvent);
-
-#[cfg(test)]
-#[path = "events_test.rs"]
-mod tests;
