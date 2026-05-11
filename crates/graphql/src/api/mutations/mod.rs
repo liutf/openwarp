@@ -17,14 +17,12 @@ pub mod generate_api_key;
 pub mod generate_commands;
 pub mod generate_dialogue;
 pub mod generate_metadata_for_command;
-pub mod give_up_notebook_edit_access;
-pub mod grab_notebook_edit_access;
+// OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
+// `leave_object` / `record_object_action` / `remove_object_guest` 5 个 mutation
+// 唯一消费方 (ObjectClient impl) 已本地 stub 为 Err,文件一并物理删除。
 pub mod issue_task_identity_token;
-pub mod leave_object;
 pub mod mint_custom_token;
 pub mod move_object;
-pub mod record_object_action;
-pub mod remove_object_guest;
 pub mod remove_object_link_permissions;
 pub mod request_bonus;
 pub mod set_object_link_permissions;

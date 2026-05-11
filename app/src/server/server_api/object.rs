@@ -73,20 +73,10 @@ use warp_graphql::{
             DeleteObject, DeleteObjectInput, DeleteObjectResult, DeleteObjectVariables,
         },
         empty_trash::{EmptyTrash, EmptyTrashInput, EmptyTrashResult, EmptyTrashVariables},
-        give_up_notebook_edit_access::{
-            GiveUpNotebookEditAccess, GiveUpNotebookEditAccessVariables,
-        },
-        grab_notebook_edit_access::{GrabNotebookEditAccess, GrabNotebookEditAccessVariables},
-        leave_object::{LeaveObject, LeaveObjectInput, LeaveObjectResult, LeaveObjectVariables},
+        // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
+        // `leave_object` / `record_object_action` / `remove_object_guest` 5 个 GraphQL
+        // mutation 已物理删除,对应 ObjectClient impl 全部本地 stub 返回 Err。
         move_object::{MoveObject, MoveObjectInput, MoveObjectResult, MoveObjectVariables},
-        record_object_action::{
-            RecordObjectAction, RecordObjectActionInput, RecordObjectActionResult,
-            RecordObjectActionVariables,
-        },
-        remove_object_guest::{
-            RemoveObjectGuest, RemoveObjectGuestInput, RemoveObjectGuestResult,
-            RemoveObjectGuestVariables,
-        },
         remove_object_link_permissions::{
             RemoveObjectLinkPermissions, RemoveObjectLinkPermissionsInput,
             RemoveObjectLinkPermissionsResult, RemoveObjectLinkPermissionsVariables,
@@ -129,14 +119,15 @@ use warp_graphql::{
             WorkflowUpdate,
         },
     },
-    notebook::{UpdateNotebookEditAccessInput, UpdateNotebookEditAccessResult},
+    // OpenWarp Wave1-2:`UpdateNotebookEditAccess{Input,Result}` 唯一消费方
+    // (grab/give_up notebook edit access impl) 已本地化为 Err stub,导入删除。
     object::CloudObjectWithDescendants,
     object_permissions::AccessLevel,
     queries::{
-        get_cloud_environments::{
-            GetCloudEnvironmentsQuery, GetCloudEnvironmentsQueryVariables,
-            GetCloudEnvironmentsResult,
-        },
+        // OpenWarp Wave1-2:`get_cloud_environments` query 唯一消费方
+        // (fetch_environment_last_task_run_timestamps impl) 已本地化为 Ok(空 HashMap),
+        // GraphQL operation 模块保留(Wave 2 走 GraphQL audit 统一处理 query
+        // 物理删除),但导入可先删。
         get_cloud_object::{
             CloudObjectInput, CloudObjectResult, GetCloudObject, GetCloudObjectVariables,
         },
@@ -758,57 +749,27 @@ impl ObjectClient for ServerApi {
         response.update_generic_string_object.try_into()
     }
 
-    async fn grab_notebook_edit_access(&self, notebook_id: NotebookId) -> Result<ServerMetadata> {
-        let variables = GrabNotebookEditAccessVariables {
-            input: UpdateNotebookEditAccessInput {
-                uid: cynic::Id::new(notebook_id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = GrabNotebookEditAccess::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.grab_notebook_edit_access {
-            UpdateNotebookEditAccessResult::UpdateNotebookEditAccessOutput(output) => {
-                // The grabNotebookEditAccess API errors if unable to grab the baton,
-                // so we're always in the success case here.
-                output.metadata.try_into()
-            }
-            UpdateNotebookEditAccessResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateNotebookEditAccessResult::Unknown => Err(anyhow!(
-                "Failed to grab notebook edit access due to unknown variant"
-            )),
-        }
+    async fn grab_notebook_edit_access(&self, _notebook_id: NotebookId) -> Result<ServerMetadata> {
+        // OpenWarp Wave1-2:本地单机无多人编辑锁(notebook editing baton),返回 Err
+        // 让 UpdateManager 走 RequestFailed 分支。对于 optimistically_grant_access=true 的
+        // 常见调用路径,该分支只记 warn 日志,本地乐观更新会保留(用户仍可编辑)。
+        // 不能用 Ok(ServerMetadata::default()):RequestSucceeded 分支会调
+        // `store_metadata_update` 拿返回的 metadata 覆写本地上下文编辑者 / trashed_ts /
+        // folder_id / creator_uid,反而破坏本地状态。
+        Err(anyhow!(
+            "Notebook multi-editor lock is disabled in OpenWarp"
+        ))
     }
 
     async fn give_up_notebook_edit_access(
         &self,
-        notebook_id: NotebookId,
+        _notebook_id: NotebookId,
     ) -> Result<ServerMetadata> {
-        let variables = GiveUpNotebookEditAccessVariables {
-            input: UpdateNotebookEditAccessInput {
-                uid: cynic::Id::new(notebook_id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = GiveUpNotebookEditAccess::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.give_up_notebook_edit_access {
-            UpdateNotebookEditAccessResult::UpdateNotebookEditAccessOutput(output) => {
-                output.metadata.try_into()
-            }
-            UpdateNotebookEditAccessResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateNotebookEditAccessResult::Unknown => Err(anyhow!(
-                "Failed to give up notebook edit access due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave1-2:同上。与 grab_notebook_edit_access 对称,本地无并发编辑者,
+        // 上层 RequestFailed 分支只记日志,乐观释放已在本地生效。
+        Err(anyhow!(
+            "Notebook multi-editor lock is disabled in OpenWarp"
+        ))
     }
 
     // OpenWarp(本地化,Phase 2d-4a-1):原 `get_warp_drive_updates` GraphQL Subscription 实现
@@ -1330,53 +1291,25 @@ impl ObjectClient for ServerApi {
 
     async fn record_object_action(
         &self,
-        id: ServerId,
-        action_type: ObjectActionType,
-        timestamp: DateTime<Utc>,
-        data: Option<String>,
+        _id: ServerId,
+        _action_type: ObjectActionType,
+        _timestamp: DateTime<Utc>,
+        _data: Option<String>,
     ) -> Result<ObjectActionHistory> {
-        let variables = RecordObjectActionVariables {
-            input: RecordObjectActionInput {
-                action: action_type.into(),
-                json_data: data,
-                timestamp: timestamp.into(),
-                uid: id.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = RecordObjectAction::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.record_object_action {
-            RecordObjectActionResult::RecordObjectActionOutput(output) => output.history.try_into(),
-            RecordObjectActionResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            RecordObjectActionResult::Unknown => Err(anyhow!(
-                "Failed to record object action due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave1-2:云端审计日志下线。sync_queue 在本地化场景下不会真正
+        // 入队这项(NetworkStatus offline + should_dequeue 为 false),但 trait 必须保留。
+        // 不能返回 Ok(空 ObjectActionHistory):上层 `maybe_overwrite_object_action_history`
+        // 会用返回值覆写本地 actions 列表,丢失本地动作历史。
+        Err(anyhow!(
+            "Cloud object action audit log is disabled in OpenWarp"
+        ))
     }
 
-    async fn leave_object(&self, id: ServerId) -> Result<ObjectDeleteResult> {
-        let variables = LeaveObjectVariables {
-            input: LeaveObjectInput {
-                object_uid: id.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = LeaveObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.leave_object {
-            LeaveObjectResult::LeaveObjectOutput(output) => Ok(ObjectDeleteResult::Success {
-                deleted_ids: vec![SyncId::ServerId(ServerId::from_string_lossy(
-                    output.object_uid.into_inner(),
-                ))],
-            }),
-            LeaveObjectResult::UserFacingError(e) => Err(anyhow!(get_user_facing_error_message(e))),
-            LeaveObjectResult::Unknown => Err(anyhow!("Unknown variant leaving object")),
-        }
+    async fn leave_object(&self, _id: ServerId) -> Result<ObjectDeleteResult> {
+        // OpenWarp Wave1-2:云端 share 已下线,本地无法 leave 一个共享对象。
+        // 返回 Err 让 UpdateManager 走 RequestFailed 分支,只弹失败 toast 不变本地 SQLite。
+        // UI 入口 (DriveIndex::leave_object) 在本地机型下本不可达(无 share 对象)。
+        Err(anyhow!("Leave shared object is disabled in OpenWarp"))
     }
 
     async fn set_object_link_permissions(
@@ -1507,66 +1440,23 @@ impl ObjectClient for ServerApi {
 
     async fn remove_object_guest(
         &self,
-        object_id: ServerId,
-        guest: GuestIdentifier,
+        _object_id: ServerId,
+        _guest: GuestIdentifier,
     ) -> Result<ServerPermissions> {
-        let (email, team_uid) = match guest {
-            GuestIdentifier::Email(email) => (Some(email), None),
-            GuestIdentifier::TeamUid(uid) => (None, Some(cynic::Id::new(uid))),
-        };
-
-        let variables = RemoveObjectGuestVariables {
-            input: RemoveObjectGuestInput {
-                email,
-                object_uid: cynic::Id::new(object_id),
-                team_uid,
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = RemoveObjectGuest::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.remove_object_guest {
-            RemoveObjectGuestResult::RemoveObjectGuestOutput(output) => {
-                Ok(output.object_permissions.try_into()?)
-            }
-            RemoveObjectGuestResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            RemoveObjectGuestResult::Unknown => Err(anyhow!(
-                "Failed to remove object guest due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave1-2:云端 share / guest 概念已下线。UpdateManager 中原
+        // `remove_object_guest` / `remove_ai_conversation_guest` 调用点已随 Phase 2c-2
+        // (update_object 本地化) 一同移除。trait 保留以兼容 FakeObjectClient 与
+        // 未来可能复活的 UI 入口。
+        Err(anyhow!("Object guest management is disabled in OpenWarp"))
     }
 
     async fn fetch_environment_last_task_run_timestamps(
         &self,
     ) -> Result<HashMap<String, DateTime<Utc>>> {
-        let variables = GetCloudEnvironmentsQueryVariables {
-            request_context: get_request_context(),
-        };
-
-        let operation = GetCloudEnvironmentsQuery::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.get_cloud_environments {
-            GetCloudEnvironmentsResult::GetCloudEnvironmentsOutput(output) => {
-                let mut timestamps = HashMap::new();
-                for env in output.cloud_environments {
-                    if let Some(task) = env.last_task_created {
-                        timestamps.insert(env.uid.into_inner(), task.created_at.utc());
-                    }
-                }
-                Ok(timestamps)
-            }
-            GetCloudEnvironmentsResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            GetCloudEnvironmentsResult::Unknown => Err(anyhow!(
-                "Failed to fetch cloud environments due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave1-2:ambient agent 云端环境下线,本地不存在 cloud environment
+        // "最后使用"时间戳。返回空表,UpdateManager::fetch_and_merge_environment_timestamps
+        // 会以空 HashMap 走 update_environment_last_task_run_timestamps,无副作用。
+        Ok(HashMap::new())
     }
 }
 
