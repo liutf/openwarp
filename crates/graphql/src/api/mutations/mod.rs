@@ -43,7 +43,6 @@ pub mod set_is_invite_link_enabled;
 pub mod set_object_link_permissions;
 pub mod set_team_discoverability;
 pub mod set_team_member_role;
-pub mod set_user_is_onboarded;
 pub mod share_block;
 pub mod stripe_billing_portal;
 pub mod transfer_generic_string_object_owner;

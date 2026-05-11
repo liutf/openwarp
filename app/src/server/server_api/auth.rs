@@ -19,9 +19,8 @@ use warp_graphql::queries::get_conversation_usage::{
     ConversationUsage, GetConversationUsage, GetConversationUsageVariables, UserResult,
 };
 
-use warp_graphql::mutations::set_user_is_onboarded::{
-    SetUserIsOnboarded, SetUserIsOnboardedResult, SetUserIsOnboardedVariables,
-};
+// OpenWarp(本地化,Phase 6 GraphQL audit 清理):`SetUserIsOnboarded` mutation 本地化后未使用,
+// import 移除;GraphQL 文件本身在同 commit 中物理删除。
 // openWarp 闭源遥测剥离 P4c review:UpdateUserSettings* 类型在 4 个 stub 后已无消费者,
 // import 整段删。GraphQL mutation 模块本身留作后续物理删。
 use warp_graphql::mutations::{
@@ -429,23 +428,11 @@ impl AuthClient for ServerApi {
     }
 
     async fn set_user_is_onboarded(&self) -> Result<bool> {
-        let variables = SetUserIsOnboardedVariables {
-            request_context: get_request_context(),
-        };
-
-        let operation = SetUserIsOnboarded::build(variables);
-        let result = self
-            .send_graphql_request(operation, None)
-            .await?
-            .set_user_is_onboarded;
-
-        match result {
-            SetUserIsOnboardedResult::SetUserIsOnboardedOutput(_) => Ok(true),
-            SetUserIsOnboardedResult::UserFacingError(user_facing_error) => {
-                Err(anyhow!(get_user_facing_error_message(user_facing_error)))
-            }
-            SetUserIsOnboardedResult::Unknown => Err(anyhow!("failed to set user is onboarded")),
-        }
+        // OpenWarp(本地化,Phase 6 GraphQL audit 清理):原发 GraphQL `SetUserIsOnboarded`
+        // mutation 标记云端 onboarding 状态。OpenWarp 无云端账号概念,onboarding 状态全部
+        // 走本地 settings,此处 no-op 返回 true。`auth_manager.rs::set_user_onboarded` 调用点
+        // 不动(仅用于本地 auth_state 更新与持久化)。
+        Ok(true)
     }
 
     async fn request_device_code(
