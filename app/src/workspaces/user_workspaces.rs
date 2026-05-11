@@ -17,7 +17,6 @@ use crate::{
     server::{
         experiments::{ServerExperiment, ServerExperiments, ServerExperimentsEvent},
         ids::ServerId,
-        server_api::{team::TeamClient, workspace::WorkspaceClient},
     },
     settings::{AISettings, PrivacySettings},
     workspaces::workspace::{
@@ -26,16 +25,12 @@ use crate::{
 };
 use anyhow::Result;
 use regex::Regex;
-use std::sync::Arc;
 use warp_core::{
     features::FeatureFlag,
     settings::{ChangeEventReason, Setting},
 };
 use warp_graphql::workspace::FeatureModelChoice;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, Tracked};
-
-#[cfg(test)]
-use crate::server::server_api::{team::MockTeamClient, workspace::MockWorkspaceClient};
 
 #[cfg(test)]
 use crate::workspaces::workspace::{
@@ -94,8 +89,6 @@ pub struct UserWorkspaces {
     current_workspace_uid: Tracked<Option<WorkspaceUid>>,
     workspaces: Tracked<Vec<Workspace>>,
     joinable_teams: Vec<DiscoverableTeam>,
-    team_client: Arc<dyn TeamClient>,
-    workspace_client: Arc<dyn WorkspaceClient>,
 }
 
 /// Represents the workspaces a user potentially has access to.
@@ -130,8 +123,6 @@ pub struct CreateTeamResponse {
 impl UserWorkspaces {
     #[cfg(test)]
     pub fn mock(
-        team_client: Arc<dyn TeamClient>,
-        workspace_client: Arc<dyn WorkspaceClient>,
         cached_workspaces: Vec<Workspace>,
         _ctx: &mut ModelContext<Self>,
     ) -> Self {
@@ -142,24 +133,15 @@ impl UserWorkspaces {
             current_workspace_uid: cached_workspaces.first().map(|w| w.uid).into(),
             workspaces: cached_workspaces.into(),
             joinable_teams: Default::default(),
-            team_client,
-            workspace_client,
         }
     }
 
     #[cfg(test)]
     pub fn default_mock(ctx: &mut ModelContext<Self>) -> Self {
-        Self::mock(
-            Arc::new(MockTeamClient::new()),
-            Arc::new(MockWorkspaceClient::new()),
-            vec![],
-            ctx,
-        )
+        Self::mock(vec![], ctx)
     }
 
     pub fn new(
-        team_client: Arc<dyn TeamClient>,
-        workspace_client: Arc<dyn WorkspaceClient>,
         cached_workspaces: Vec<Workspace>,
         current_workspace_uid: Option<WorkspaceUid>,
         ctx: &mut ModelContext<Self>,
@@ -173,8 +155,6 @@ impl UserWorkspaces {
             current_workspace_uid: current_workspace_uid.into(),
             workspaces: cached_workspaces.into(),
             joinable_teams: Default::default(),
-            team_client,
-            workspace_client,
         }
     }
 
@@ -1516,6 +1496,5 @@ impl Entity for UserWorkspaces {
 /// Mark UserWorkspaces as global application state.
 impl SingletonEntity for UserWorkspaces {}
 
-#[cfg(test)]
-#[path = "user_workspaces_tests.rs"]
-mod user_workspaces_tests;
+// OpenWarp(本地化,Phase 5):`user_workspaces_tests.rs` 全部针对 team RPC 路径(`MockTeamClient` / `mockall::Sequence`),
+// 本地化后这些路径不可达，整文件物理删除。
