@@ -7,15 +7,10 @@ pub mod managed_secrets;
 pub mod object;
 pub(crate) mod presigned_upload;
 pub mod referral;
-pub mod team;
-pub mod workspace;
+// OpenWarp(Wave 3-2):`team` / `workspace` 两个 client trait 与 impl 已物理删,
+// 在 app/ 外 0 消费,UserWorkspaces / TeamUpdateManager 已在 Phase 5 本地化为 no-op。
 
 use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::ai::predict::generate_ai_input_suggestions;
-use crate::ai::predict::generate_ai_input_suggestions::GenerateAIInputSuggestionsRequest;
-use crate::ai::predict::generate_am_query_suggestions;
-use crate::ai::predict::generate_am_query_suggestions::GenerateAMQuerySuggestionsRequest;
-use crate::ai::predict::predict_am_queries::{PredictAMQueriesRequest, PredictAMQueriesResponse};
 use crate::ai::voice::transcribe::{TranscribeRequest, TranscribeResponse};
 use crate::auth::auth_manager::AuthManager;
 use crate::auth::auth_state::AuthState;
@@ -31,12 +26,10 @@ use futures::StreamExt;
 use object::ObjectClient;
 use prost::Message;
 use referral::ReferralsClient;
-use team::TeamClient;
 use url::Url;
 use warp_core::errors::{register_error, AnyhowErrorExt, ErrorExt};
 use warp_managed_secrets::client::ManagedSecretsClient;
 use warpui::{r#async::BoxFuture, ModelContext};
-use workspace::WorkspaceClient;
 
 use crate::server::telemetry::TelemetryApi;
 use crate::settings::PrivacySettingsSnapshot;
@@ -53,7 +46,6 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use warp_core::telemetry::TelemetryEvent;
@@ -905,123 +897,19 @@ impl ServerApi {
         self.telemetry_api.flush_events(settings_snapshot).await
     }
 
-    /// Sends a batched Rudder request containing events written to the file at `path`. This is a
-    /// no-op if telemetry is disabled.
-    pub async fn flush_persisted_events_to_rudder(
-        &self,
-        path: &Path,
-        settings_snapshot: PrivacySettingsSnapshot,
-    ) -> Result<()> {
-        self.telemetry_api
-            .flush_persisted_events_to_rudder(path, settings_snapshot)
-            .await
-    }
-
-    /// Writes all queued [`TelemetryEvent`]s to a file, limiting the number of written
-    /// events to `max_events`. Events are queued using the [`send_telemetry_from_ctx`] or
-    /// [`send_telemetry_from_app_ctx`] macros. If telemetry is disabled, no events are written to
-    /// disk.
-    pub fn persist_telemetry_events(
-        &self,
-        max_event_count: usize,
-        settings_snapshot: PrivacySettingsSnapshot,
-    ) -> Result<()> {
-        self.telemetry_api
-            .flush_and_persist_events(max_event_count, settings_snapshot)
-    }
-
-    /// Hits the /ai/generate_input_suggestions endpoint to get the predicted next action, based on past context.
-    pub async fn generate_ai_input_suggestions(
-        &self,
-        request: &GenerateAIInputSuggestionsRequest,
-    ) -> Result<generate_ai_input_suggestions::GenerateAIInputSuggestionsResponseV2, AIApiError>
-    {
-        let auth_token = self.get_or_refresh_access_token().await?;
-
-        let request_builder = self.client.post(format!(
-            "{}/ai/generate_input_suggestions",
-            ChannelState::server_root_url()
-        ));
-        let response = if let Some(token) = auth_token.as_bearer_token() {
-            request_builder.bearer_auth(token)
-        } else {
-            request_builder
-        }
-        .json(request)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-        Ok(response)
-    }
-
-    // OpenWarp:原 `get_relevant_files` 走仪家服务端 RAG。已随 outline / GetRelevantFilesController
-    // 下线推退。默认 BYOP 不走服务端 RAG。
-
-    /// Hits the /ai/generate_am_query_suggestions endpoint to get the predicted next query.
-    pub async fn generate_am_query_suggestions(
-        &self,
-        request: &GenerateAMQuerySuggestionsRequest,
-    ) -> Result<generate_am_query_suggestions::GenerateAMQuerySuggestionsResponse, AIApiError> {
-        let auth_token = self.get_or_refresh_access_token().await?;
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "agent_mode_evals")] {
-                let url = format!(
-                    "{}/agent-mode-evals/generate_am_query_suggestions",
-                    ChannelState::server_root_url()
-                );
-            } else {
-                let url = format!(
-                    "{}/ai/generate_am_query_suggestions",
-                    ChannelState::server_root_url()
-                );
-            }
-        }
-
-        let request_builder = self.client.post(url);
-        let response = if let Some(token) = auth_token.as_bearer_token() {
-            request_builder.bearer_auth(token)
-        } else {
-            request_builder
-        }
-        .json(request)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-        Ok(response)
-    }
-
-    pub async fn predict_am_queries(
-        &self,
-        request: &PredictAMQueriesRequest,
-    ) -> Result<PredictAMQueriesResponse, AIApiError> {
-        let auth_token = self.get_or_refresh_access_token().await?;
-        let request_builder = self.client.post(format!(
-            "{}/ai/predict_am_queries",
-            ChannelState::server_root_url()
-        ));
-        let response = if let Some(token) = auth_token.as_bearer_token() {
-            request_builder.bearer_auth(token)
-        } else {
-            request_builder
-        }
-        .json(request)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-        Ok(response)
-    }
+    // OpenWarp(Wave 3-2):`flush_persisted_events_to_rudder` / `persist_telemetry_events` /
+    // `generate_ai_input_suggestions` / `generate_am_query_suggestions` / `predict_am_queries`
+    // 等方法均 0 外部消费,已物理删。原 `flush_persisted_events_to_rudder` 用来
+    // 发送 batched Rudder 请求(本地落盘事件 → 发送 Rudder),现由 telemetry 本地化全 stub。
 
     /// 语音转写 — OpenWarp 已禁用。
     ///
     /// BYOP genai chat 协议无法承载音频流,且 OpenWarp 已剥离 Warp Inc 云端,
     /// `/ai/transcribe` 端点不可达。直接返回 `Disabled`,UI 层显示禁用提示。
+    ///
+    /// OpenWarp(Wave 3-2):`ServerApi::transcribe` 本身在 app/ 外 0 消费(语音 UI
+    /// 走 `Transcriber` trait),但 `TranscribeError` 作为 trait 返回类型仍被
+    /// `voice/transcriber.rs` 消费。本方法留下作为 stub 防未来重接,实现仅返回 Disabled。
     pub async fn transcribe(
         &self,
         _request: &TranscribeRequest,
@@ -1300,14 +1188,6 @@ impl ServerApiProvider {
     }
 
     pub fn get_block_client(&self) -> Arc<dyn BlockClient> {
-        self.server_api.clone()
-    }
-
-    pub fn get_workspace_client(&self) -> Arc<dyn WorkspaceClient> {
-        self.server_api.clone()
-    }
-
-    pub fn get_team_client(&self) -> Arc<dyn TeamClient> {
         self.server_api.clone()
     }
 
