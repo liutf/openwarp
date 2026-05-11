@@ -1,4 +1,4 @@
-use warp_core::ui::appearance::Appearance;
+﻿use warp_core::ui::appearance::Appearance;
 use warp_server_client::cloud_object::ServerPermissions;
 use warpui::{
     platform::WindowStyle, AddSingletonModel, App, SingletonEntity, TypedActionView, ViewHandle,
@@ -6,7 +6,7 @@ use warpui::{
 
 use crate::{
     ai::blocklist::BlocklistAIHistoryModel,
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     cloud_object::{
         model::{actions::ObjectActions, persistence::CloudModel, view::CloudViewModel},
         CloudObjectSyncStatus, ObjectIdType, ObjectType, Owner, ServerCreationInfo, Space,

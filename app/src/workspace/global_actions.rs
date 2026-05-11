@@ -1,10 +1,13 @@
 use crate::network::NetworkStatus;
 use crate::persistence::ModelEvent;
-use crate::server::server_api::auth::AuthClient;
+// OpenWarp Wave 3-1:`AuthClient` trait 与 `workspace:debug_create_anonymous_user`
+// debug action 随 auth 子系统下线一同物理删。
+use crate::app_state::get_app_state;
 use crate::terminal::alt_screen_reporting::AltScreenReporting;
 use crate::terminal::general_settings::GeneralSettings;
 use crate::workspace::cross_window_tab_drag::CrossWindowTabDrag;
-use crate::{app_state::get_app_state, server::server_api::ServerApiProvider};
+// OpenWarp Wave 3-1:`ServerApiProvider` 不再被本文件使用,`debug_create_anonymous_user`
+// debug action 随 AuthClient 一同物理删。
 use ::settings::ToggleableSetting;
 use warp_core::execution_mode::AppExecutionMode;
 
@@ -18,7 +21,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::stream::AbortHandle;
-use warp_graphql::mutations::create_anonymous_user::AnonymousUserType;
 use warpui::r#async::Timer;
 use warpui::windowing::WindowManager;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, TypedActionView};
@@ -123,10 +125,8 @@ pub fn init_global_actions(app: &mut AppContext) {
         "workspace:toggle_debug_network_status",
         toggle_debug_network_status,
     );
-    app.add_global_action(
-        "workspace:debug_create_anonymous_user",
-        create_anonymous_user,
-    );
+    // OpenWarp Wave 3-1:`workspace:debug_create_anonymous_user` global action 随
+    // AuthClient + create_anonymous_user GraphQL mutation 一同物理删。
     app.add_global_action("workspace:open_repository", open_repository);
     app.add_global_action("app:undo_close", undo_close);
 }
@@ -215,17 +215,9 @@ fn toggle_debug_network_status(_: &(), ctx: &mut AppContext) {
     });
 }
 
-fn create_anonymous_user(_: &(), ctx: &mut AppContext) {
-    log::info!("Creating anonymous user");
-    let anonymous_user_type = AnonymousUserType::NativeClientAnonymousUser;
-    let server_api = ServerApiProvider::handle(ctx).read(ctx, |provider, _ctx| provider.get());
-    let result =
-        warpui::r#async::block_on(server_api.create_anonymous_user(None, anonymous_user_type));
-    match result {
-        Ok(user) => log::info!("Successfully created anonymous user {user:?}"),
-        Err(err) => log::error!("Failed to create anonymous user: {err:?}"),
-    }
-}
+// OpenWarp Wave 3-1:`fn create_anonymous_user`(debug 调试入口,原调用
+// `ServerApi::create_anonymous_user` GraphQL mutation)随 AuthClient + GraphQL operation
+// 一同物理删。OpenWarp 已无匿名用户概念。
 
 /// Reopens the last closed item (window or tab).
 fn undo_close(_: &(), ctx: &mut AppContext) {

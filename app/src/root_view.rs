@@ -1,14 +1,14 @@
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::blocklist::SerializedBlockListItem;
 use crate::appearance::Appearance;
-use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
-use crate::auth::auth_override_warning_modal::AuthOverrideWarningModalVariant;
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthRedirectPayload;
-use crate::auth::login_slide::{LoginSlideEvent, LoginSlideSource, LoginSlideView};
-use crate::auth::needs_sso_link_view::NeedsSsoLinkView;
-use crate::auth::paste_auth_token_modal::{PasteAuthTokenModalEvent, PasteAuthTokenModalView};
+use crate::auth::AuthOverrideWarningModalVariant;
+use crate::auth::AuthRedirectPayload;
+use crate::auth::AuthState;
+use crate::auth::NeedsSsoLinkView;
+use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::auth::{AuthStateProvider, LoginFailureReason};
+use crate::auth::{LoginSlideEvent, LoginSlideSource, LoginSlideView};
+use crate::auth::{PasteAuthTokenModalEvent, PasteAuthTokenModalView};
 use crate::autoupdate::{AutoupdateState, AutoupdateStateEvent};
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::cloud_object::{GenericStringObjectFormat, JsonObjectType, ObjectType};
@@ -27,12 +27,12 @@ use onboarding::{
     AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention, SelectedSettings,
 };
 
+use crate::auth::UserAuthenticationError;
 use crate::persistence::ModelEvent;
 use crate::report_if_error;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::experiments::is_free_user_no_ai_experiment_active;
 use crate::server::ids::SyncId;
-use crate::server::server_api::auth::UserAuthenticationError;
 use crate::server::server_api::ServerApiProvider;
 use crate::server::telemetry::LaunchConfigUiLocation;
 use crate::settings::QuakeModeSettings;
@@ -68,8 +68,8 @@ use crate::{
     UpdateQuakeModeEventArg,
 };
 use crate::{
-    auth::auth_override_warning_modal::{AuthOverrideWarningModal, AuthOverrideWarningModalEvent},
-    auth::auth_view_modal::{AuthView, AuthViewVariant},
+    auth::{AuthOverrideWarningModal, AuthOverrideWarningModalEvent},
+    auth::{AuthView, AuthViewVariant},
     server::server_api::ServerApi,
     workspace::{view::OnboardingTutorial, PaneViewLocator, Workspace, WorkspaceRegistry},
 };
@@ -114,7 +114,7 @@ use warpui::{
 use warpui::{FocusContext, NextNewWindowsHasThisWindowsBoundsUponClose};
 
 #[cfg(target_family = "wasm")]
-use crate::auth::web_handoff::{WebHandoffEvent, WebHandoffView};
+use crate::auth::{WebHandoffEvent, WebHandoffView};
 
 /// 返回当前 channel 的产品名,作为窗口标题初始值与 quake/transferred 窗口标题。
 ///
@@ -2289,6 +2289,9 @@ impl RootView {
                         me.focus(ctx);
                         ctx.notify();
                     }
+                    // OpenWarp Wave 3-1:`TokenSubmitted` 由 stub facade 提供,运行时
+                    // 不会被触发。
+                    PasteAuthTokenModalEvent::TokenSubmitted(_) => {}
                 });
                 ctx.focus(&modal);
                 self.paste_auth_token_modal = Some(modal);

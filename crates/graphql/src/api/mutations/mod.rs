@@ -1,8 +1,5 @@
-pub mod create_anonymous_user;
 pub mod create_managed_secret;
 pub mod delete_managed_secret;
-pub mod expire_api_key;
-pub mod generate_api_key;
 pub mod generate_commands;
 pub mod generate_metadata_for_command;
 // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
@@ -27,6 +24,14 @@ pub mod generate_metadata_for_command;
 // `generate_commands` / `generate_metadata_for_command` 有复用类型被
 // `app/src/ai_assistant` / `app/src/drive/workflows/ai_assist.rs` import,
 // 保留 operation 文件;Wave 3 裁掉调用方后可进一步删除。
+//
+// OpenWarp Wave 3-1:再删 4 个 auth-only mutation —
+// `create_anonymous_user` / `expire_api_key` / `generate_api_key` /
+// `mint_custom_token` — 唯一消费方
+// `AuthClient impl for ServerApi` 已随 server_api/auth.rs 整文件物理删,
+// 上层 AuthManager 改为本地 stub,不再发起任何云端身份请求。
+// `issue_task_identity_token` 仍被 BYOP AWS / GCP federated credentials 链路
+// (`ai/aws_credentials.rs` + `ai/agent_sdk/federate.rs` + `cloud_provider/aws.rs`)
+// 消费,保留 operation 文件。
 pub mod issue_task_identity_token;
-pub mod mint_custom_token;
 pub mod update_managed_secret;

@@ -8,10 +8,10 @@ use crate::cloud_object::{
     RevisionAndLastEditor, ServerCreationInfo,
 };
 
+use crate::auth::UserAuthenticationError;
 use crate::drive::CloudObjectTypeAndId;
 use crate::notebooks::CloudNotebookModel;
 use crate::server::cloud_objects::update_manager::InitiatedBy;
-use crate::server::server_api::auth::UserAuthenticationError;
 use crate::server::server_api::ServerApiProvider;
 use crate::system::SystemStats;
 use crate::workflows::workflow::{Argument, ArgumentType, Workflow};

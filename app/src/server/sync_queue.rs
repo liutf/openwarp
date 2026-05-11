@@ -16,8 +16,9 @@ use uuid::Uuid;
 use super::{
     graphql::GraphQLError,
     ids::{ClientId, HashableId, ObjectUid, ServerId, SyncId, ToServerId},
-    server_api::{auth::UserAuthenticationError, object::ObjectClient},
+    server_api::object::ObjectClient,
 };
+use crate::auth::UserAuthenticationError;
 
 use crate::ai::mcp::templatable::CloudTemplatableMCPServerModel;
 use crate::server::cloud_objects::update_manager::InitiatedBy;

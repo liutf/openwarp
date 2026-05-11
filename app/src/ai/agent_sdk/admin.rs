@@ -5,9 +5,9 @@ use serde::Serialize;
 use warp_cli::agent::OutputFormat;
 use warpui::{platform::TerminationMode, AppContext, SingletonEntity};
 
-use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
-use crate::auth::user::PrincipalType;
 use crate::auth::AuthStateProvider;
+use crate::auth::PrincipalType;
+use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
 /// Kick off a device authorization login flow and handle auth events.

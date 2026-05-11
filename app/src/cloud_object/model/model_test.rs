@@ -3,10 +3,10 @@ use lazy_static::lazy_static;
 use settings::{RespectUserSyncSetting, SyncToCloud};
 use warpui::{App, ModelHandle};
 
-use crate::auth::auth_manager::AuthManager;
-use crate::auth::user::TEST_USER_UID;
+use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::auth::UserUid;
+use crate::auth::TEST_USER_UID;
 use crate::cloud_object::model::actions::ObjectActions;
 use crate::cloud_object::model::generic_string_model::GenericStringModel;
 use crate::cloud_object::model::view::CloudViewModel;

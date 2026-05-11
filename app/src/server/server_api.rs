@@ -1,5 +1,7 @@
 pub mod ai;
-pub mod auth;
+// OpenWarp Wave 3-1:`server_api/auth.rs`(AuthClient trait + impl)整文件物理删,
+// `AuthManager` 改为本地 stub。两个 HTTP header 常量直接迁入本文件,供 ambient agent
+// 路径继续使用(实际运行时永远不命中,因 OpenWarp 已无云端 ambient workload)。
 pub mod block;
 pub mod harness_support;
 pub mod integrations;
@@ -12,12 +14,11 @@ pub mod referral;
 
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::voice::transcribe::{TranscribeRequest, TranscribeResponse};
-use crate::auth::auth_manager::AuthManager;
-use crate::auth::auth_state::AuthState;
+use crate::auth::AuthManager;
+use crate::auth::AuthState;
 use crate::server::graphql::default_request_options;
 use crate::server::server_api::presigned_upload::HttpStatusError;
 use ai::AIClient;
-use auth::{AuthClient, AMBIENT_WORKLOAD_TOKEN_HEADER, CLOUD_AGENT_ID_HEADER};
 use base64::prelude::BASE64_URL_SAFE;
 use base64::Engine;
 use block::BlockClient;
@@ -30,6 +31,16 @@ use url::Url;
 use warp_core::errors::{register_error, AnyhowErrorExt, ErrorExt};
 use warp_managed_secrets::client::ManagedSecretsClient;
 use warpui::{r#async::BoxFuture, ModelContext};
+
+/// Header key for the ambient workload token attached to multi-agent requests.
+///
+/// OpenWarp Wave 3-1:常量原定义在 `server_api/auth.rs`,该文件整文件物理删后
+/// 直接迁入本文件,运行时不再有云端 ambient workload token 发签,header 注入路径
+/// 始终走 `None` 分支。
+pub const AMBIENT_WORKLOAD_TOKEN_HEADER: &str = "X-Warp-Ambient-Workload-Token";
+
+/// Header key for the cloud agent task ID attached to requests from ambient agents.
+pub const CLOUD_AGENT_ID_HEADER: &str = "X-Warp-Cloud-Agent-ID";
 
 use crate::server::telemetry::TelemetryApi;
 use crate::settings::PrivacySettingsSnapshot;
@@ -395,8 +406,8 @@ pub struct ServerApi {
     // TODO(jeff): Make `TelemetryApi` another type of client, and move it off `ServerApi`.
     telemetry_api: TelemetryApi,
     last_server_time: Arc<Mutex<Option<ServerTime>>>,
-    // We technically use OAuth2 for headless device authentication.
-    oauth_client: self::auth::OAuth2Client,
+    // OpenWarp Wave 3-1:原 `oauth_client: self::auth::OAuth2Client` 随 auth.rs 一同
+    // 物理删。CLI headless device auth 路径在 OpenWarp 下线。
     /// Cached ambient workload token for requests from ambient agents.
     ambient_workload_token: Arc<Mutex<Option<warp_isolation_platform::WorkloadToken>>>,
     /// The ambient agent task ID for requests from cloud agents.
@@ -416,12 +427,10 @@ impl ServerApi {
     ) -> Self {
         // We generate a random user ID for evals so we can run evals in parallel.
         #[cfg(feature = "agent_mode_evals")]
-        let eval_user_id = {
+        let oauth_user_id = {
             use rand::Rng;
             Some(EVAL_USER_IDS[rand::thread_rng().gen_range(0..EVAL_USER_IDS.len())])
         };
-
-        let oauth_client = Self::create_oauth_client();
 
         Self {
             client: Arc::new(http_client::Client::new()),
@@ -429,12 +438,11 @@ impl ServerApi {
             event_sender,
             telemetry_api: TelemetryApi::new(),
             last_server_time: Arc::new(Mutex::new(None)),
-            oauth_client,
             ambient_workload_token: Arc::new(Mutex::new(None)),
             ambient_agent_task_id: Arc::new(RwLock::new(None)),
             agent_source,
             #[cfg(feature = "agent_mode_evals")]
-            eval_user_id,
+            eval_user_id: oauth_user_id,
         }
     }
 
@@ -442,15 +450,12 @@ impl ServerApi {
     fn new_for_test() -> Self {
         let (tx, _) = async_channel::unbounded();
 
-        let oauth_client = Self::create_oauth_client();
-
         Self {
             client: Arc::new(http_client::Client::new_for_test()),
             auth_state: Arc::new(AuthState::new_for_test()),
             event_sender: tx,
             telemetry_api: TelemetryApi::new(),
             last_server_time: Arc::new(Mutex::new(None)),
-            oauth_client,
             ambient_workload_token: Arc::new(Mutex::new(None)),
             ambient_agent_task_id: Arc::new(RwLock::new(None)),
             agent_source: None,
@@ -487,21 +492,26 @@ impl ServerApi {
             .collect())
     }
 
-    fn create_oauth_client() -> self::auth::OAuth2Client {
-        let server_root =
-            Url::parse(&ChannelState::server_root_url()).expect("Server root URL must be valid");
+    // OpenWarp Wave 3-1:`create_oauth_client` 随 `OAuth2Client` 类型与
+    // `request_device_code` / `exchange_device_access_token` RPC 一同物理删。
+    // CLI headless device auth 路径在 OpenWarp 下线。
 
-        let token_url = server_root
-            .join("/api/v1/oauth/token")
-            .expect("Invalid token URL");
+    // OpenWarp Wave 3-1:`get_or_refresh_access_token()` 与
+    // `get_or_create_ambient_workload_token()` 原是 `AuthClient` trait method。
+    // trait 随 auth.rs 一同物理删,但 ServerApi 内部仍有 ~9 处调用。
+    // 这里提供本地 stub:bearer token 取 AuthState 本地缓存(使用 `crate::auth::AuthToken`
+    // 作为返回类型以兼容原 trait 签名),ambient workload token 返回 None。
 
-        let device_url = server_root
-            .join("/api/v1/oauth/device/auth")
-            .expect("Invalid device URL");
+    pub async fn get_or_refresh_access_token(&self) -> Result<crate::auth::AuthToken> {
+        Ok(self
+            .auth_state
+            .credentials()
+            .map(|c| c.bearer_token())
+            .unwrap_or(crate::auth::AuthToken::NoAuth))
+    }
 
-        oauth2::basic::BasicClient::new(oauth2::ClientId::new("warp-cli".to_string()))
-            .set_token_uri(oauth2::TokenUrl::from_url(token_url))
-            .set_device_authorization_url(oauth2::DeviceAuthorizationUrl::from_url(device_url))
+    pub async fn get_or_create_ambient_workload_token(&self) -> Result<Option<String>> {
+        Ok(None)
     }
 
     pub fn send_graphql_request<'a, QF, O: warp_graphql::client::Operation<QF> + Send + 'a>(
@@ -524,10 +534,10 @@ impl ServerApi {
 
         Box::pin(async move {
             let operation_name = operation.operation_name().map(Cow::into_owned);
-            let auth_token = self
-                .get_or_refresh_access_token()
-                .await
-                .context("Failed to get access token for GraphQL request")?;
+            // OpenWarp Wave 3-1:原 `self.get_or_refresh_access_token().await` (AuthClient method)
+            // 随 auth.rs 一同物理删。本地化后 bearer token 直接读 AuthState 缓存,
+            // OpenWarp 路径下绝大多数为 `None`。
+            let auth_token = self.auth_state.get_access_token_ignoring_validity();
 
             #[cfg(feature = "agent_mode_evals")]
             let mut headers = headers;
@@ -539,7 +549,7 @@ impl ServerApi {
             }
 
             let options = warp_graphql::client::RequestOptions {
-                auth_token: auth_token.bearer_token(),
+                auth_token,
                 timeout,
                 headers,
                 ..default_request_options()
@@ -1179,9 +1189,8 @@ impl ServerApiProvider {
         self.server_api.clone()
     }
 
-    pub fn get_auth_client(&self) -> Arc<dyn AuthClient> {
-        self.server_api.clone()
-    }
+    // OpenWarp Wave 3-1:`get_auth_client()` 随 `AuthClient` trait 一同物理删,
+    // 所有外部原调用方改为本地 stub (返回 `AuthToken::NoAuth` / `Ok(())`)。
 
     pub fn get_referrals_client(&self) -> Arc<dyn ReferralsClient> {
         self.server_api.clone()

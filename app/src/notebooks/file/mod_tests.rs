@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+﻿use std::{path::Path, sync::Arc};
 
 use pathfinder_geometry::vector::vec2f;
 
@@ -13,7 +13,7 @@ use warpui::{platform::WindowStyle, App, SingletonEntity, View};
 use crate::server::telemetry::context_provider::AppTelemetryContextProvider;
 use crate::terminal::keys::TerminalKeybindings;
 use crate::{
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     cloud_object::model::persistence::CloudModel,
     notebooks::{editor::keys::NotebookKeybindings, file::is_markdown_file},
     search::files::model::FileSearchModel,

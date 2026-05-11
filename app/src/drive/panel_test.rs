@@ -1,9 +1,9 @@
-use warp_core::ui::appearance::Appearance;
+﻿use warp_core::ui::appearance::Appearance;
 use warpui::{platform::WindowStyle, App};
 
 use crate::{
     ai::blocklist::BlocklistAIHistoryModel,
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     cloud_object::{
         model::{persistence::CloudModel, view::CloudViewModel},
         Space,

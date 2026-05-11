@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+﻿use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -40,7 +40,7 @@ use crate::ui_components::buttons::icon_button;
 use crate::view_components::{Dropdown, DropdownItem};
 use crate::{
     appearance::Appearance,
-    auth::auth_manager::AuthManager,
+    auth::AuthManager,
     channel::ChannelState,
     report_if_error, send_telemetry_from_ctx,
     server::telemetry::TelemetryEvent,

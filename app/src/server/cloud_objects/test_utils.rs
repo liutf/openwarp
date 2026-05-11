@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     collections::HashMap,
     sync::{
         mpsc::{sync_channel, Receiver},
@@ -11,7 +11,7 @@ use warp_core::execution_mode::{AppExecutionMode, ExecutionMode};
 use warpui::{App, ModelHandle, SingletonEntity};
 
 use crate::{
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     cloud_object::model::{
         actions::ObjectActions,
         persistence::{CloudModel, CloudModelEvent},

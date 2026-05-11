@@ -1243,9 +1243,7 @@ impl From<warp_graphql::workspace::LlmInfo> for LLMInfo {
                 let config: RoutingHostConfig = config.into();
                 let host = config.model_routing_host.clone();
                 if map.insert(host.clone(), config).is_some() {
-                    log::warn!(
-                        "Duplicate LlmModelHost entry for {host:?}, using latest value"
-                    );
+                    log::warn!("Duplicate LlmModelHost entry for {host:?}, using latest value");
                 }
             }
             map

@@ -1,6 +1,6 @@
 use super::hoa_onboarding;
-use crate::auth::auth_manager::AuthManagerEvent;
 use crate::auth::AuthManager;
+use crate::auth::AuthManagerEvent;
 use crate::channel::{Channel, ChannelState};
 // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
 use crate::settings::{AISettings, CodeSettings};

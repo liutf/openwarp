@@ -16,7 +16,8 @@ use super::{
     },
 };
 use crate::{
-    ai::blocklist::usage::conversation_usage_view::ConversationUsageInfo,
+    // OpenWarp Wave 3-1:`ConversationUsageInfo` 随 `get_conversation_usage`
+    // GraphQL operation + AuthClient 随 一同物理删。
     ai::execution_profiles::{ActionPermission, ComputerUsePermission, WriteToPtyPermission},
     ai::{BonusGrant, BonusGrantScope},
     auth::UserUid,
@@ -63,9 +64,7 @@ use warp_graphql::{
         UsageBasedPricingPolicy as GqlUsageBasedPricingPolicy, WarpAiPolicy as GqlWarpAiPolicy,
     },
     object::CloudObjectWithDescendants,
-    queries::{
-        get_conversation_usage as gql_usage, get_workspaces_metadata_for_user::User as GqlUser,
-    },
+    queries::get_workspaces_metadata_for_user::User as GqlUser,
     user::{DiscoverableTeamData as GqlDiscoverableTeamData, PublicUserProfile},
     workspace::{
         AdminEnablementSetting as GqlAdminEnablementSetting, AiAutonomyValue as GqlAiAutonomyValue,
@@ -243,28 +242,10 @@ impl From<GqlUgcCollectionEnablementSetting> for UgcCollectionEnablementSetting 
     }
 }
 
-impl From<&gql_usage::ConversationUsage> for ConversationUsageInfo {
-    fn from(gql: &gql_usage::ConversationUsage) -> Self {
-        let persistence::model::ConversationUsageMetadata {
-            credits_spent,
-            token_usage: models,
-            tool_usage_metadata: tool,
-            context_window_usage,
-            ..
-        } = (&gql.usage_metadata).into();
-        ConversationUsageInfo {
-            credits_spent,
-            credits_spent_for_last_block: None,
-            tool_calls: tool.total_tool_calls(),
-            models,
-            context_window_usage,
-            files_changed: tool.apply_file_diff_stats.files_changed,
-            lines_added: tool.apply_file_diff_stats.lines_added,
-            lines_removed: tool.apply_file_diff_stats.lines_removed,
-            commands_executed: tool.run_command_stats.commands_executed,
-        }
-    }
-}
+// OpenWarp Wave 3-1:`impl From<&gql_usage::ConversationUsage> for ConversationUsageInfo`
+// 随 `get_conversation_usage` query 与 `AuthClient::get_conversation_usage_history`
+// 一同物理删除。OpenWarp 本地化后 会话用量元数据只从本地 SQLite +
+// chat_stream 被动送达,不再有从云端 GraphQL 抓 `ConversationUsage` 的路径。
 
 impl From<GqlAdminEnablementSetting> for AdminEnablementSetting {
     fn from(gql_admin_enablement_setting: GqlAdminEnablementSetting) -> AdminEnablementSetting {

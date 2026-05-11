@@ -12,11 +12,7 @@ use warpui::{
 };
 
 use crate::{
-    auth::{
-        auth_manager::AuthManager,
-        user::{TEST_USER_EMAIL, TEST_USER_UID},
-        AuthStateProvider, UserUid,
-    },
+    auth::{AuthManager, AuthStateProvider, UserUid, TEST_USER_EMAIL, TEST_USER_UID},
     cloud_object::{
         model::{
             actions::ObjectActions,

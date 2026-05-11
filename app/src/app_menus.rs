@@ -3,6 +3,7 @@ use std::fs::File;
 
 use crate::default_terminal::DefaultTerminal;
 use crate::features::{runtime_flags_menu_items, FeatureFlag};
+use crate::report_if_error;
 use crate::root_view::OpenLaunchConfigArg;
 use crate::server::telemetry::LaunchConfigUiLocation;
 use crate::settings::{
@@ -16,7 +17,6 @@ use crate::user_config::WarpConfig;
 use crate::util::bindings::{self, trigger_to_keystroke, CustomAction};
 use crate::util::links;
 use crate::workspace::sync_inputs::SyncedInputState;
-use crate::{report_if_error};
 use csv::Writer;
 use enclose::enclose;
 use settings::manager::SettingsManager;
@@ -810,12 +810,8 @@ fn debug_menu_items() -> Vec<MenuItem> {
             None,
         )));
 
-        debug_menu_items.push(MenuItem::Custom(CustomMenuItem::new(
-            &crate::t!("app-menu-create-anonymous-user"),
-            move |ctx| ctx.dispatch_global_action("workspace:debug_create_anonymous_user", &()),
-            no_updates,
-            None,
-        )));
+        // OpenWarp Wave 3-1:"Create anonymous user" debug menu item 随
+        // `workspace:debug_create_anonymous_user` global action + AuthClient 一同物理删。
     }
 
     if FeatureFlag::RuntimeFeatureFlags.is_enabled() {

@@ -1,4 +1,4 @@
-mod action;
+﻿mod action;
 mod agent_view;
 pub mod ambient_agent;
 mod block_banner;
@@ -217,9 +217,9 @@ use crate::ai::{
     },
     execution_profiles::profiles::{AIExecutionProfilesModel, ClientProfileId},
 };
-use crate::auth::auth_manager::AuthManager;
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthViewVariant;
+use crate::auth::AuthManager;
+use crate::auth::AuthState;
+use crate::auth::AuthViewVariant;
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::autoupdate::{self, get_update_state, AutoupdateStage};
 use crate::cloud_object::model::actions::ObjectActionType;

@@ -12,9 +12,9 @@ use super::{
 };
 
 use crate::ai::AIRequestUsageModel;
-use crate::auth::auth_manager::{AuthManager, LoginGatedFeature};
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthViewVariant;
+use crate::auth::AuthState;
+use crate::auth::AuthViewVariant;
+use crate::auth::{AuthManager, LoginGatedFeature};
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::menu::{self, Menu, MenuItem, MenuItemFields};
 use crate::modal::{Modal, ModalEvent, ModalViewState};

@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+﻿use std::sync::mpsc;
 
 use warp_core::ui::appearance::Appearance;
 use warpui::{
@@ -7,7 +7,7 @@ use warpui::{
 
 use crate::{
     ai::blocklist::BlocklistAIHistoryModel,
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     cloud_object::{
         model::{actions::ObjectActions, persistence::CloudModel, view::CloudViewModel},
         Owner,

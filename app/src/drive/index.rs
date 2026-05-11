@@ -7,10 +7,7 @@ use crate::{
     },
     appearance::Appearance,
     auth::{
-        auth_manager::{AuthManager, LoginGatedFeature},
-        auth_state::AuthState,
-        auth_view_modal::AuthViewVariant,
-        AuthStateProvider,
+        AuthState, AuthStateProvider, AuthViewVariant, {AuthManager, LoginGatedFeature},
     },
     cloud_object::{
         model::{
