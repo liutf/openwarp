@@ -1,12 +1,10 @@
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::AIAgentExchangeId;
-use crate::pricing::PricingInfoModel;
 use crate::server::server_api::ai::AIClient;
 use crate::settings::AISettings;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::workspaces::workspace::WorkspaceUid;
 use crate::BlocklistAIHistoryModel;
-use ai::api_keys::ApiKeyManager;
 use chrono::{DateTime, Utc};
 use instant::Instant;
 use serde::{Deserialize, Serialize};
@@ -322,14 +320,12 @@ impl AIRequestUsageModel {
 
     /// Returns the number of remaining requests the user has based on their latest rate limit info.
     /// If the current time is past the next refresh time, then the number of remaining reqs is the limit.
+    ///
+    /// OpenWarp(本地化,Phase 3c-1):本地化场景下无 Warp Inc 侧信息限额概念,
+    /// 始终返回 `usize::MAX` 表示不受限。原逻辑依赖 `request_limit_info`,
+    /// 本地默认值不会被 `refresh_request_usage_async`(no-op)更新。
     fn requests_remaining(&self) -> usize {
-        if self.next_refresh_time() <= Utc::now() || self.is_unlimited() {
-            self.request_limit_info.limit
-        } else {
-            self.request_limit_info
-                .limit
-                .saturating_sub(self.request_limit_info.num_requests_used_since_refresh)
-        }
+        usize::MAX
     }
 
     /// Returns `true` if the user has at least one request remaining before hitting the AI request
@@ -337,8 +333,10 @@ impl AIRequestUsageModel {
     ///
     /// WARNING: This method doesn't account for add-on credits. Consider if you want
     /// [`Self::has_any_ai_remaining`] instead.
+    ///
+    /// OpenWarp(本地化,Phase 3c-1):永远返回 true,BYOP 本地运行不受云端限额约束。
     pub fn has_requests_remaining(&self) -> bool {
-        self.requests_remaining() > 0
+        true
     }
 
     /// Returns `true` if the user meets one of the following conditions:
@@ -349,36 +347,12 @@ impl AIRequestUsageModel {
     /// 5. user's team is on enterprise with bonus grants auto-reload enable (enterprise only)
     /// 6. user has BYOK enabled and has provided at least one API key
     /// Use this method as the starting point for AI availability checking.
-    pub fn has_any_ai_remaining(&self, ctx: &AppContext) -> bool {
-        let current_workspace = UserWorkspaces::as_ref(ctx).current_workspace();
-
-        let has_base_plan_ai_requests = self.has_requests_remaining();
-
-        let user_bonus_credits = self.total_user_interactive_bonus_credits_remaining() > 0;
-        let workspace_bonus_credits = current_workspace
-            .map(|workspace| self.total_workspace_bonus_credits_remaining(workspace.uid) > 0)
-            .unwrap_or_default();
-
-        let workspace_has_overages =
-            current_workspace.is_some_and(|workspace| workspace.are_overages_remaining());
-
-        let is_payg_enabled = current_workspace
-            .is_some_and(|w| w.billing_metadata.is_enterprise_pay_as_you_go_enabled());
-
-        let is_enterprise_auto_reload_enabled = current_workspace
-            .is_some_and(|w| w.billing_metadata.is_enterprise_auto_reload_enabled());
-
-        // If you have provided your own API key,
-        // it doesn't matter if you are out of warp-provided requests.
-        let has_byo_api_key = UserWorkspaces::as_ref(ctx).is_byo_api_key_enabled()
-            && ApiKeyManager::as_ref(ctx).keys().has_any_key();
-
-        has_base_plan_ai_requests
-            || (user_bonus_credits || workspace_bonus_credits)
-            || workspace_has_overages
-            || is_payg_enabled
-            || is_enterprise_auto_reload_enabled
-            || has_byo_api_key
+    ///
+    /// OpenWarp(本地化,Phase 3c-1):永远返回 true,BYOP 与本地 LLM provider 场景下
+    /// AI 可用性仅取决于用户是否配置了 API key(由 `ApiKeyManager` 独立控制),
+    /// 不该被 `request_limit_info` 等云端计量组件决定。
+    pub fn has_any_ai_remaining(&self, _ctx: &AppContext) -> bool {
+        true
     }
 
     pub fn requests_used(&self) -> usize {
@@ -401,7 +375,8 @@ impl AIRequestUsageModel {
     }
 
     pub fn is_unlimited(&self) -> bool {
-        self.request_limit_info.is_unlimited
+        // OpenWarp(本地化,Phase 3c-1):本地化场景下永远不受限。
+        true
     }
 
     pub fn refresh_duration_to_string(&self) -> String {
@@ -466,69 +441,15 @@ impl AIRequestUsageModel {
 
     /// Computes the current banner state based on live conditions.
     /// This is called on-demand and always returns fresh state.
+    ///
+    /// OpenWarp(本地化,Phase 3c-1):本地化场景无 "购买额外 credits" 的业务逻辑,
+    /// 永远返回 `Hidden`。各种下柜的计量计算(workspace tier policy / overage /
+    /// auto-reload / monthly limit 等)不再需要。
     pub fn compute_buy_addon_credits_banner_display_state(
         &self,
-        ctx: &AppContext,
+        _ctx: &AppContext,
     ) -> BuyCreditsBannerDisplayState {
-        // Early return if user dismissed
-        if self.buy_addon_credits_banner_dismissed {
-            return BuyCreditsBannerDisplayState::Hidden;
-        }
-        let current_workspace = UserWorkspaces::as_ref(ctx).current_workspace();
-        let policy_allows_purchasing = current_workspace
-            .map(|w| {
-                w.billing_metadata
-                    .tier
-                    .purchase_add_on_credits_policy
-                    .is_some_and(|p| p.enabled)
-            })
-            .unwrap_or(false);
-
-        // TODO: we might want to suggest credits purchase if request_remain/bonus credits is below certain threshold
-        // something to consider after launch
-        // Ambient-only credits are usable for cloud agents and should not suppress this banner.
-        let now = Utc::now();
-        let has_non_ambient_bonus_credits = self
-            .bonus_grants
-            .iter()
-            .filter(|grant| grant.grant_type != BonusGrantType::AmbientOnly)
-            .filter(|grant| grant.expiration.is_none_or(|exp| now < exp))
-            .filter(|grant| grant.request_credits_remaining > 0)
-            .any(|grant| match grant.scope {
-                BonusGrantScope::User => true,
-                BonusGrantScope::Workspace(uid) => {
-                    current_workspace.is_some_and(|workspace| workspace.uid == uid)
-                }
-            });
-        if !policy_allows_purchasing
-            || self.has_requests_remaining()
-            || has_non_ambient_bonus_credits
-        {
-            return BuyCreditsBannerDisplayState::Hidden;
-        }
-
-        let auto_reload_enabled = current_workspace
-            .is_some_and(|w| w.settings.addon_credits_settings.auto_reload_enabled);
-        if !auto_reload_enabled {
-            return BuyCreditsBannerDisplayState::OutOfCredits;
-        }
-
-        let at_monthly_limit =
-            current_workspace.is_some_and(|w| w.is_at_addon_credits_monthly_limit());
-
-        let auto_reload_would_exceed = current_workspace
-            .and_then(|workspace| {
-                let options = PricingInfoModel::as_ref(ctx).addon_credits_options()?;
-                let price = workspace.get_auto_reload_price_cents(options)?;
-                Some(workspace.would_addon_purchase_reach_limit(price))
-            })
-            .unwrap_or(false);
-
-        if at_monthly_limit || auto_reload_would_exceed {
-            BuyCreditsBannerDisplayState::MonthlyLimitReached
-        } else {
-            BuyCreditsBannerDisplayState::Hidden
-        }
+        BuyCreditsBannerDisplayState::Hidden
     }
 
     pub fn dismiss_buy_credits_banner(&mut self, ctx: &mut ModelContext<Self>) {
@@ -577,8 +498,10 @@ impl AIRequestUsageModel {
 
     /// Checks request limits to see if the user can make a voice request.
     /// Returns true if the user can make a voice request, false otherwise.
+    ///
+    /// OpenWarp(本地化,Phase 3c-1):本地语音输入不受云端额度限制,永远返回 true。
     pub fn can_request_voice(&self) -> bool {
-        self.has_voice_requests_remaining()
+        true
     }
 }
 
