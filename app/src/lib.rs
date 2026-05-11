@@ -2486,8 +2486,9 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::IntegrationCommand,
         #[cfg(feature = "artifact_command")]
         FeatureFlag::ArtifactCommand,
-        #[cfg(feature = "cloud_environments")]
-        FeatureFlag::CloudEnvironments,
+        // OpenWarp(本地化,Phase 3c-2):CloudEnvironments 下柜。导致 `warp environment`
+        // 子命令拒绝执行与隐藏,且 `warp agent run --environment` 参数不可用。
+        // 本地 harness 运行不依赖云端 environment。
         #[cfg(all(feature = "simulate_github_unauthed", debug_assertions))]
         FeatureFlag::SimulateGithubUnauthed,
         #[cfg(feature = "session_sharing_acls")]
