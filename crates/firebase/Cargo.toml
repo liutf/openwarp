@@ -8,5 +8,5 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-anyhow.workspace = true
+# OpenWarp Wave 4-3:仅保留 `FirebaseError`,不再依赖 anyhow。
 serde.workspace = true
