@@ -151,7 +151,7 @@ use quit_warning::UnsavedStateSummary;
 use server::network_log_pane_manager::NetworkLogPaneManager;
 use server::network_logging::NetworkLogModel;
 use server::telemetry::context_provider::AppTelemetryContextProvider;
-use server::voice_transcriber::ServerVoiceTranscriber;
+// OpenWarp(本地化,Phase 4):`ServerVoiceTranscriber` 原用于默认 VoiceTranscriber 注入,现走 `VoiceTranscriber::disabled()`,同名 import 暂收。
 #[cfg(feature = "local_fs")]
 use settings::import::model::ImportedConfigModel;
 use voice::transcriber::VoiceTranscriber;
@@ -1620,7 +1620,11 @@ fn initialize_app(
     #[cfg(feature = "voice_input")]
     ctx.add_singleton_model(voice_input::VoiceInput::new);
     ctx.add_singleton_model(|_| {
-        VoiceTranscriber::new(Arc::new(ServerVoiceTranscriber::new(server_api.clone())))
+        // OpenWarp(本地化,Phase 4):原默认注入 `ServerVoiceTranscriber` 走云端 Wispr STT。
+        // 本地化场景下云端语音转写不可用,改为 `disabled()` 让上层 `transcriber()` 返 None,
+        // 语音输入 UI 变为只采集不转写(后续接入本地 STT 补上)。
+        let _ = server_api;
+        VoiceTranscriber::disabled()
     });
 
     timer.mark_interval_end("CORE_SINGLETONS_REGISTERED");
