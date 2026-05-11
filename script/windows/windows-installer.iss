@@ -16,6 +16,10 @@
 #ifndef ReleaseChannel
   #define ReleaseChannel "dev"
 #endif
+#ifndef AppUserModelId
+  ; 默认跟随官方 channel 的 `dev.warp.*` 命名;OSS 在 bundle.ps1 里会覆盖为 `dev.openwarp.OpenWarp`。
+  #define AppUserModelId "dev.warp." + MyAppName
+#endif
 #ifndef TargetProfileDir
   #define TargetProfileDir "target\release-lto-debug_assertions"
 #endif
@@ -137,8 +141,8 @@ Type: filesandordirs; Name: "{localappdata}\warp\{#MyAppName}"
 Type: filesandordirs; Name: "{app}\bin"
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; AppUserModelID: "dev.warp.{#MyAppName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; AppUserModelID: "dev.warp.{#MyAppName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; AppUserModelID: "{#AppUserModelId}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: postinstall runhidden nowait
@@ -241,7 +245,7 @@ begin
     CmdScriptContent := '@echo off' + #13#10 +
                        'set "WARP_CLI_MODE=1"' + #13#10 +
                        '"' + ExpandConstant('{app}\{#MyAppExeName}') + '" %*' + #13#10;
-    
+
     SaveStringToFile(CmdScriptPath, CmdScriptContent, False);
   end;
 end;
