@@ -852,49 +852,31 @@ impl AgentDriverRunner {
     /// Creates a new task on the server for this agent run, sets the task ID on the driver
     /// options, and updates the Server API provider so that all subsequent requests to warp-server
     /// contain this new task ID.
+    ///
+    /// OpenWarp(本地化,Phase 3b-2):原实现调 `server_api.create_agent_task` 在云端创建
+    /// ambient agent task,获取服务端 task_id 后在后续请求中携带。本地化后:
+    ///   - 不发 GraphQL `create_agent_task` mutation
+    ///   - `driver_options.task_id` 保持 `None`
+    ///   - `ServerApiProvider::set_ambient_agent_task_id(None)` 以清除可能的遗留
+    /// 下游所有 `if let Some(task_id) = driver_options.task_id` 分支自动跳过。
+    /// BYOP 本地 harness 运行不依赖该 task_id,根据 `harness/` 代码路径仅在服务端
+    /// 汇报状态时使用。
     async fn initialize_new_task(
         foreground: &ModelSpawner<Self>,
-        server_api: &Arc<dyn AIClient>,
-        prompt: String,
-        merged_config: AgentConfigSnapshot,
+        _server_api: &Arc<dyn AIClient>,
+        _prompt: String,
+        _merged_config: AgentConfigSnapshot,
         driver_options: &mut AgentDriverOptions,
     ) -> Result<(), AgentDriverError> {
-        let environment = merged_config.environment_id.clone();
-        let task_config = if merged_config.is_empty() {
-            None
-        } else {
-            let mut config = merged_config;
-            // We don't set a worker, since this is a local run.
-            config.worker_host = None;
-            Some(config)
-        };
-
-        let task_id = match server_api
-            .create_agent_task(prompt, environment, None, task_config)
-            .await
-        {
-            Ok(id) => {
-                log::info!("Created task: {id}");
-                Some(id)
-            }
-            Err(e) => {
-                log::error!("Failed to create task: {e}");
-                // Continue without a task_id rather than failing entirely
-                None
-            }
-        };
-
+        driver_options.task_id = None;
         foreground
             .spawn(move |_, ctx| {
-                // Set the task ID on the ServerApi so it's sent with all subsequent requests.
                 ServerApiProvider::handle(ctx)
                     .as_ref(ctx)
                     .get()
-                    .set_ambient_agent_task_id(task_id);
+                    .set_ambient_agent_task_id(None);
             })
             .await?;
-        driver_options.task_id = task_id;
-
         Ok(())
     }
 
