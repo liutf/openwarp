@@ -183,3 +183,156 @@ fn test_find_applicable_rules_with_relative_paths() {
     assert!(paths.contains(&PathBuf::from("src/WARP.md")));
     assert!(paths.contains(&PathBuf::from("src/components/WARP.md")));
 }
+
+// ---------------------------------------------------------------------------
+// Fast-path tests(针对 ProjectContextModel::scan_fast_path + fast_path_entry_still_valid)
+// ---------------------------------------------------------------------------
+//
+// 这些测试走真实 fs(临时目录),不依赖 ModelContext。覆盖:
+//   - cwd 本身有 AGENTS.md → 命中
+//   - WARP.md 优先于 AGENTS.md(同目录)
+//   - 祖先目录规则可被 findUp 到
+//   - 无规则 → 返 None
+//   - 失效检查:修改文件 mtime → still_valid 返 false
+//   - 失效检查:在 walked 目录里新增规则文件 → still_valid 返 false
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_finds_agents_md_in_cwd() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    std::fs::write(cwd.join("AGENTS.md"), "hello agents").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert_eq!(entry.rules.len(), 1, "期望命中 1 个规则");
+    assert_eq!(entry.rules[0].content, "hello agents");
+    assert_eq!(entry.rules[0].path, cwd.join("AGENTS.md"));
+    assert_eq!(entry.root_path, cwd);
+    assert_eq!(entry.stamps.len(), 1);
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_warp_md_takes_priority_over_agents_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    std::fs::write(cwd.join("WARP.md"), "warp wins").unwrap();
+    std::fs::write(cwd.join("AGENTS.md"), "agents loses").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert_eq!(
+        entry.rules.len(),
+        1,
+        "同目录两个规则文件只取 1 个(对齐 RuleAtPath::respected_rule)"
+    );
+    assert_eq!(entry.rules[0].content, "warp wins");
+    assert_eq!(entry.rules[0].path, cwd.join("WARP.md"));
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_finds_rule_in_ancestor_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let sub = root.join("a").join("b").join("c");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(root.join("AGENTS.md"), "ancestor rule").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&sub);
+    assert_eq!(entry.rules.len(), 1);
+    assert_eq!(entry.rules[0].content, "ancestor rule");
+    assert_eq!(entry.root_path, root);
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_returns_empty_when_no_rules_anywhere() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert!(entry.rules.is_empty());
+    // root_path 回退为 cwd(语义对齐 find_applicable_rules 的 None 返回)
+    assert_eq!(entry.root_path, cwd);
+    // walked_dir_stamps 不为空(至少 walked 了 cwd 本身,negative cache 可生效)
+    assert!(!entry.walked_dir_stamps.is_empty());
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_still_valid_when_nothing_changed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    std::fs::write(cwd.join("AGENTS.md"), "stable").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert!(ProjectContextModel::fast_path_entry_still_valid(&entry));
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_invalidated_when_rule_file_mtime_changes() {
+    use filetime::{set_file_mtime, FileTime};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    let rule = cwd.join("AGENTS.md");
+    std::fs::write(&rule, "v1").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert!(ProjectContextModel::fast_path_entry_still_valid(&entry));
+
+    // 把 mtime 推后 10s → 缓存应被检测为失效
+    let stamp = entry.stamps[0].1;
+    let new_mtime = FileTime::from_system_time(stamp + std::time::Duration::from_secs(10));
+    set_file_mtime(&rule, new_mtime).unwrap();
+    assert!(!ProjectContextModel::fast_path_entry_still_valid(&entry));
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_invalidated_when_new_rule_file_appears_in_walked_dir() {
+    use filetime::{set_file_mtime, FileTime};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+
+    // 首次扫描:未命中任何规则(negative cache)
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert!(entry.rules.is_empty());
+
+    // 记录原始目录 mtime,后面手动推进一下以触发失效检测。
+    // 只在这里才创建文件 — 但某些文件系统创建文件不会马上更新目录 mtime。
+    // 为了测试稳定性,创建文件后显式调 set_file_mtime 保证目录 mtime 不同于 stamp。
+    std::fs::write(cwd.join("AGENTS.md"), "new!").unwrap();
+    let original_dir_mtime = entry.walked_dir_stamps[0].1;
+    let bumped =
+        FileTime::from_system_time(original_dir_mtime + std::time::Duration::from_secs(10));
+    set_file_mtime(&cwd, bumped).unwrap();
+
+    assert!(!ProjectContextModel::fast_path_entry_still_valid(&entry));
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_walk_depth_bounded() {
+    // 验证 MAX_WALK_DEPTH 生效:深度超过上限的目录不会 stat 到顶层规则文件。
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    // 构造 ≥7 层子目录(MAX_WALK_DEPTH = 6)
+    let mut deep = root.clone();
+    for seg in ["a", "b", "c", "d", "e", "f", "g"] {
+        deep.push(seg);
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(root.join("AGENTS.md"), "top").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&deep);
+    // 走不到顶层,拿不到规则
+    assert!(
+        entry.rules.is_empty(),
+        "深度超限后不应 stat 到顶层规则文件"
+    );
+    // walked_dir_stamps 不超过 MAX_WALK_DEPTH
+    assert!(entry.walked_dir_stamps.len() <= 6);
+}
