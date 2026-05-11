@@ -21,7 +21,6 @@ use super::user::User;
 use super::AuthStateProvider;
 use super::UserUid;
 use crate::ai::llms::LLMPreferences;
-use crate::ai::AIRequestUsageModel;
 use crate::autoupdate::AutoupdateState;
 use crate::persistence::ModelEvent;
 use crate::server::cloud_objects::update_manager::UpdateManager;
@@ -37,7 +36,6 @@ use crate::server::{
     },
     telemetry::AnonymousUserSignupEntrypoint,
 };
-use crate::settings::cloud_preferences_syncer::CloudPreferencesSyncer;
 use crate::settings::initializer::SettingsInitializer;
 use crate::settings::PrivacySettings;
 use crate::terminal::general_settings::GeneralSettings;
@@ -361,13 +359,8 @@ impl AuthManager {
                     model.initiate_data_pollers(false, ctx);
                 });
 
-                CloudPreferencesSyncer::handle(ctx).update(ctx, |model, ctx| {
-                    model.handle_user_fetched(self.auth_state.clone(), ctx)
-                });
-
-                AIRequestUsageModel::handle(ctx).update(ctx, |usage_model, ctx| {
-                    usage_model.refresh_request_usage_async(ctx);
-                });
+                // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
+                // `AIRequestUsageModel::refresh_request_usage_async` 已为 no-op,不再调用。
 
                 LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
                     prefs.update_feature_model_choices(Ok(llms), ctx);

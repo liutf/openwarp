@@ -218,7 +218,6 @@ use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::experiments::ServerExperiments;
 use crate::server::sync_queue::{QueueItem, SyncQueue};
 use crate::session_management::{RunningSessionSummary, SessionNavigationData};
-use crate::settings::cloud_preferences_syncer::initialize_cloud_preferences_syncer;
 use crate::settings::manager::SettingsManager;
 use crate::settings::{AccessibilitySettings, ScrollSettings, SelectionSettings};
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
@@ -1748,13 +1747,10 @@ fn initialize_app(
     });
 
     let toml_file_path = settings::user_preferences_toml_file_path();
-    ctx.add_singleton_model(move |ctx| {
-        initialize_cloud_preferences_syncer(
-            toml_file_path,
-            startup_toml_parse_error_for_syncer.as_deref(),
-            ctx,
-        )
-    });
+    // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。原同步器负责本地
+    // settings.toml 与云端 preferences 双向同步,本地化场景下只保留本地 toml 加载。
+    let _ = toml_file_path;
+    let _ = startup_toml_parse_error_for_syncer;
 
     // LogManager must be registered before any subsystem (e.g. MCP, LSP) that creates file-based loggers.
     ctx.add_singleton_model(|_| simple_logger::manager::LogManager::new());

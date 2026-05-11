@@ -21,9 +21,6 @@ use crate::launch_configs::launch_config;
 use crate::linear::LinearIssueWork;
 use crate::notebooks::manager::NotebookSource;
 use crate::settings::apply_onboarding_settings;
-use crate::settings::cloud_preferences_syncer::{
-    CloudPreferencesSyncer, CloudPreferencesSyncerEvent,
-};
 use crate::settings::AISettings;
 use crate::workspace::tab_settings::TabSettings;
 use onboarding::{
@@ -1648,9 +1645,9 @@ impl RootView {
             me.handle_auth_manager_event(event, ctx);
         });
 
-        ctx.subscribe_to_model(&CloudPreferencesSyncer::handle(ctx), |me, _, event, ctx| {
-            me.handle_cloud_preferences_syncer_event(event, ctx);
-        });
+        // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
+        // 原 `InitialLoadCompleted` 事件用于在云端 preferences 同步完成后调用
+        // `apply_onboarding_settings`,本地化场景下 onboarding 设置直接本地应用。
 
         let auth_view =
             ctx.add_typed_action_view(|ctx| AuthView::new(AuthViewVariant::Initial, ctx));
@@ -3184,28 +3181,9 @@ impl RootView {
         true
     }
 
-    /// If onboarding stashed `SelectedSettings` to be applied after auth + the
-    /// initial cloud-pref sync, drain the stash and apply now.
-    ///
-    /// Mirrors `start_pending_tutorial` in shape but triggers on a later event:
-    /// `CloudPreferencesSyncerEvent::InitialLoadCompleted` fires once
-    /// `handle_initial_load` has finished reconciling cloud→local, so any
-    /// writes we make here are the last writes and won't be clobbered by that
-    /// pass. By this point the user is also logged in, so AIExecutionProfile
-    /// edits can successfully create cloud objects via `edit_profile_internal`.
-    fn handle_cloud_preferences_syncer_event(
-        &mut self,
-        event: &CloudPreferencesSyncerEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if !matches!(event, CloudPreferencesSyncerEvent::InitialLoadCompleted) {
-            return;
-        }
-        let Some(selected_settings) = self.pending_post_auth_onboarding_settings.take() else {
-            return;
-        };
-        apply_onboarding_settings(&selected_settings, ctx);
-    }
+    /// OpenWarp(本地化,Phase 5):原 `handle_cloud_preferences_syncer_event` 在云端
+    /// preferences 同步初始加载完成后应用 onboarding settings,随同步器物理删除。
+    /// onboarding settings 现在在 onboarding 完成时直接应用,不需要延迟到 cloud sync 后。
 
     /// If onboarding stored a pending tutorial (because login was required first),
     /// start it now that the workspace exists.

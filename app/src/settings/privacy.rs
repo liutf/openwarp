@@ -27,7 +27,7 @@ use settings::{
 
 use serde::{Deserialize, Serialize};
 
-use super::cloud_preferences_syncer::CloudPreferencesSyncer;
+// OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
 use crate::workspaces::workspace::EnterpriseSecretRegex;
 
 pub trait RegexDisplayInfo {
@@ -681,15 +681,8 @@ impl PrivacySettings {
                         .is_crash_reporting_enabled
                         .set_value(self.is_crash_reporting_enabled, ctx));
                 });
-                CloudPreferencesSyncer::handle(ctx).update(ctx, |syncer, ctx| {
-                    syncer.maybe_sync_local_prefs_to_cloud(
-                        vec![
-                            IsTelemetryEnabled::storage_key().to_string(),
-                            IsCrashReportingEnabled::storage_key().to_string(),
-                        ],
-                        ctx,
-                    );
-                });
+                // OpenWarp(本地化,Phase 5):原 `CloudPreferencesSyncer::maybe_sync_local_prefs_to_cloud`
+                // 同步本地隐私设置到云端,随同步器物理删除。本地设置仅写入 sqlite。
             }
         }
     }
