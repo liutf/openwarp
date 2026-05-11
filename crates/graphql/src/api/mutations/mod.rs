@@ -1,14 +1,6 @@
-pub mod add_object_guests;
-pub mod bulk_create_objects;
 pub mod create_anonymous_user;
-pub mod create_folder;
-pub mod create_generic_string_object;
 pub mod create_managed_secret;
-pub mod create_notebook;
-pub mod create_workflow;
 pub mod delete_managed_secret;
-pub mod delete_object;
-pub mod empty_trash;
 pub mod expire_api_key;
 pub mod generate_api_key;
 pub mod generate_commands;
@@ -16,6 +8,16 @@ pub mod generate_metadata_for_command;
 // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
 // `leave_object` / `record_object_action` / `remove_object_guest` 5 个 mutation
 // 唯一消费方 (ObjectClient impl) 已本地 stub 为 Err,文件一并物理删除。
+//
+// OpenWarp Wave 2-1:再删 21 个 cloud-object mutation —
+// `add_object_guests` / `bulk_create_objects` / `create_folder` / `create_generic_string_object`
+// / `create_notebook` / `create_workflow` / `delete_object` / `empty_trash` / `move_object`
+// / `remove_object_link_permissions` / `set_object_link_permissions`
+// / `transfer_generic_string_object_owner` / `transfer_notebook_owner` / `transfer_workflow_owner`
+// / `trash_object` / `untrash_object` / `update_folder` / `update_generic_string_object`
+// / `update_notebook` / `update_object_guests` / `update_workflow` —
+// 唯一消费方 `ObjectClient impl for ServerApi` 已 100% 本地化(合成 ServerXxx
+// 或 no-op Ok),不再调任何 GraphQL 路径。
 //
 // OpenWarp Wave 2-2:再删 5 个 AI mutation —
 // `confirm_file_artifact_upload` / `create_file_artifact_upload_target`
@@ -27,17 +29,4 @@ pub mod generate_metadata_for_command;
 // 保留 operation 文件;Wave 3 裁掉调用方后可进一步删除。
 pub mod issue_task_identity_token;
 pub mod mint_custom_token;
-pub mod move_object;
-pub mod remove_object_link_permissions;
-pub mod set_object_link_permissions;
-pub mod transfer_generic_string_object_owner;
-pub mod transfer_notebook_owner;
-pub mod transfer_workflow_owner;
-pub mod trash_object;
-pub mod untrash_object;
-pub mod update_folder;
-pub mod update_generic_string_object;
 pub mod update_managed_secret;
-pub mod update_notebook;
-pub mod update_object_guests;
-pub mod update_workflow;

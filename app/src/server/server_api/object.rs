@@ -1,142 +1,65 @@
+// OpenWarp Wave 2-1:ObjectClient impl 完全本地化。
+//
+// 历史背景:
+// - trait 接口签名严格保留(Wave 3 再统一删 trait 本身、UpdateManager、SyncQueue 等
+//   "云端同步"骨架),只重写 `impl ObjectClient for ServerApi` 的 30 个方法体。
+// - UpdateManager 上层在 Phase 2c-2 / 2c-3 已对 `create_object` / `update_object` 做了
+//   本地化(`new_local` + 写 sqlite,不再调用 `create_object_online` / `update_object_online`),
+//   所以 A 类(创建/更新)在 OpenWarp 默认路径不可达。但 `SyncQueue` 在 `start_dequeueing`
+//   被触发时仍会通过 `CloudModelType::send_create_request` 等间接调用 `ObjectClient`
+//   方法,所以这一层必须返回合成成功响应,不能 panic 也不能 Err(否则 SyncQueue 会无限重试)。
+// - B 类(trash / untrash / delete / empty_trash / move):UpdateManager 中**有 server_id**
+//   的对象路径仍调 `object_client.trash_object` 等;返回 `Ok(成功)` 让上层
+//   `RequestSucceeded` 分支跑完(清 `has_pending_metadata_change`,写 sqlite)。
+//   本地化场景对象大多走 `id.server_id() == None` 短路腿,但带 server_id 的旧对象
+//   (从 cloud 同步过来的)仍走这条 RPC 腿,必须返回合成成功值。
+// - C 类(剩余 ~10 个):云端 share / guest / owner transfer / action audit /
+//   cloud environment timestamps —— 单机无对应概念,全 no-op 或 Err。
+//
+// 关键设计:
+// - 合成 server_id 不能与本地对象的 server_id 冲突。采用 `ServerId::new_random_for_local()`
+//   语义 —— 使用 `ServerId::from(u64)` + 时间戳种子,与 FakeObjectClient 的 `alloc_server_id`
+//   保持思路一致(但 ServerApi 是无状态的,所以用时间戳)。
+// - 合成 `Revision` 用 `Revision::from(Utc::now())`(public,非 test-util gated)。
+// - 不再 import 任何 `cynic::*` / `warp_graphql::mutations::*` / `warp_graphql::queries::*`
+//   ObjectClient 范围的 operation,清掉 GraphQL 依赖。
+// - `UpdatedObjectInput`(`get_updated_cloud_objects` query 的 input 类型)仍被
+//   `cloud_object::CloudObject::versions` trait 方法使用,query module 本身保留;
+//   本任务只删 21 个 mutation + 0 query(get_cloud_object 唯一消费方在
+//   `fetch_single_cloud_object` impl,删之)。
+
 use crate::{
-    ai::{
-        ambient_agents::scheduled::ScheduledAmbientAgent,
-        cloud_environments::AmbientAgentEnvironment,
-        document::ai_document_model::AIDocumentId,
-        execution_profiles::AIExecutionProfile,
-        facts::AIFact,
-        mcp::{MCPServer, TemplatableMCPServer},
-    },
     cloud_object::{
         model::{
             actions::{ObjectActionHistory, ObjectActionType},
-            generic_string_model::{
-                GenericStringModel, GenericStringObjectId, Serializer, StringModel,
-            },
-            json_model::JsonSerializer,
+            generic_string_model::GenericStringObjectId,
         },
         BulkCreateCloudObjectResult, BulkCreateGenericStringObjectsRequest,
-        CreateCloudObjectResult, CreateObjectRequest, CreatedCloudObject, GenericCloudObject,
-        GenericServerObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, ObjectDeleteResult, ObjectIdType, ObjectMetadataUpdateResult,
-        ObjectPermissionUpdateResult, ObjectPermissionsUpdateData, ObjectType, ObjectsToUpdate,
-        Owner, Revision, RevisionAndLastEditor, ServerCloudObject, ServerFolder, ServerMetadata,
-        ServerNotebook, ServerObject, ServerPermissions, ServerWorkflow, UpdateCloudObjectResult,
+        CreateCloudObjectResult, CreateObjectRequest, CreatedCloudObject,
+        GenericStringObjectFormat, GenericStringObjectUniqueKey, ObjectDeleteResult, ObjectIdType,
+        ObjectMetadataUpdateResult, ObjectPermissionUpdateResult, ObjectPermissionsUpdateData,
+        ObjectType, ObjectsToUpdate, Owner, Revision, RevisionAndLastEditor, ServerFolder,
+        ServerMetadata, ServerNotebook, ServerObject, ServerPermissions, ServerWorkflow,
+        UpdateCloudObjectResult,
     },
     drive::{folders::FolderId, sharing::SharingAccessLevel},
-    env_vars::EnvVarCollection,
-    notebooks::{NotebookId, SerializedNotebook},
+    notebooks::NotebookId,
     server::{
         cloud_objects::update_manager::{GetCloudObjectResponse, InitialLoadResponse},
-        graphql::{get_request_context, get_user_facing_error_message},
-        ids::{ClientId, HashableId, ServerId, ServerIdAndType, SyncId, ToServerId},
+        ids::{HashableId, ServerId, ServerIdAndType, SyncId},
         server_api::ServerApi,
         sync_queue::SerializedModel,
     },
-    settings::Preference,
-    workflows::{workflow_enum::WorkflowEnum, WorkflowId},
-    workspaces::user_profiles::UserProfileWithUID,
+    workflows::WorkflowId,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use cynic::{MutationBuilder, QueryBuilder};
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::collections::HashMap;
-use warp_core::report_error;
-use warp_graphql::{
-    error::UserFacingErrorInterface,
-    generic_string_object::GenericStringObjectInput,
-    mutations::{
-        add_object_guests::{
-            AddObjectGuests, AddObjectGuestsInput, AddObjectGuestsResult, AddObjectGuestsVariables,
-        },
-        bulk_create_objects::{
-            BulkCreateGenericStringObjectsInput, BulkCreateObjects, BulkCreateObjectsInput,
-            BulkCreateObjectsResult, BulkCreateObjectsVariables,
-        },
-        create_folder::{
-            CreateFolder, CreateFolderInput, CreateFolderResult, CreateFolderVariables,
-        },
-        create_generic_string_object::{
-            CreateGenericStringObject, CreateGenericStringObjectInput,
-            CreateGenericStringObjectResult, CreateGenericStringObjectVariables,
-        },
-        create_notebook::{
-            CreateNotebook, CreateNotebookInput, CreateNotebookResult, CreateNotebookVariables,
-        },
-        create_workflow::{
-            CreateWorkflow, CreateWorkflowInput, CreateWorkflowResult, CreateWorkflowVariables,
-        },
-        delete_object::{
-            DeleteObject, DeleteObjectInput, DeleteObjectResult, DeleteObjectVariables,
-        },
-        empty_trash::{EmptyTrash, EmptyTrashInput, EmptyTrashResult, EmptyTrashVariables},
-        // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
-        // `leave_object` / `record_object_action` / `remove_object_guest` 5 个 GraphQL
-        // mutation 已物理删除,对应 ObjectClient impl 全部本地 stub 返回 Err。
-        move_object::{MoveObject, MoveObjectInput, MoveObjectResult, MoveObjectVariables},
-        remove_object_link_permissions::{
-            RemoveObjectLinkPermissions, RemoveObjectLinkPermissionsInput,
-            RemoveObjectLinkPermissionsResult, RemoveObjectLinkPermissionsVariables,
-        },
-        set_object_link_permissions::{
-            SetObjectLinkPermissions, SetObjectLinkPermissionsInput,
-            SetObjectLinkPermissionsResult, SetObjectLinkPermissionsVariables,
-        },
-        transfer_generic_string_object_owner::{
-            TransferGenericStringObjectOwner, TransferGenericStringObjectOwnerInput,
-            TransferGenericStringObjectOwnerResult, TransferGenericStringObjectOwnerVariables,
-        },
-        transfer_notebook_owner::{
-            TransferNotebookOwner, TransferNotebookOwnerInput, TransferNotebookOwnerResult,
-            TransferNotebookOwnerVariables,
-        },
-        transfer_workflow_owner::{
-            TransferWorkflowOwner, TransferWorkflowOwnerInput, TransferWorkflowOwnerResult,
-            TransferWorkflowOwnerVariables,
-        },
-        trash_object::{TrashObject, TrashObjectInput, TrashObjectResult, TrashObjectVariables},
-        untrash_object::{UntrashObject, UntrashObjectInput, UntrashObjectVariables},
-        update_folder::{
-            UpdateFolder, UpdateFolderInput, UpdateFolderResult, UpdateFolderVariables,
-        },
-        update_generic_string_object::{
-            UpdateGenericStringObject, UpdateGenericStringObjectInput,
-            UpdateGenericStringObjectVariables,
-        },
-        update_notebook::{
-            NotebookUpdate, UpdateNotebook, UpdateNotebookInput, UpdateNotebookResult,
-            UpdateNotebookVariables,
-        },
-        update_object_guests::{
-            UpdateObjectGuests, UpdateObjectGuestsInput, UpdateObjectGuestsResult,
-            UpdateObjectGuestsVariables,
-        },
-        update_workflow::{
-            UpdateWorkflow, UpdateWorkflowInput, UpdateWorkflowResult, UpdateWorkflowVariables,
-            WorkflowUpdate,
-        },
-    },
-    // OpenWarp Wave1-2:`UpdateNotebookEditAccess{Input,Result}` 唯一消费方
-    // (grab/give_up notebook edit access impl) 已本地化为 Err stub,导入删除。
-    object::CloudObjectWithDescendants,
-    object_permissions::AccessLevel,
-    queries::{
-        // OpenWarp Wave1-2:`get_cloud_environments` query 唯一消费方
-        // (fetch_environment_last_task_run_timestamps impl) 已本地化为 Ok(空 HashMap),
-        // GraphQL operation 模块保留(Wave 2 走 GraphQL audit 统一处理 query
-        // 物理删除),但导入可先删。
-        get_cloud_object::{
-            CloudObjectInput, CloudObjectResult, GetCloudObject, GetCloudObjectVariables,
-        },
-        get_updated_cloud_objects::{
-            GetUpdatedCloudObjects, GetUpdatedCloudObjectsVariables, UpdatedCloudObjectsInput,
-            UpdatedCloudObjectsResult,
-        },
-    },
-};
+use warp_graphql::object_permissions::AccessLevel;
+use warp_graphql::scalars::time::ServerTimestamp;
 
 /// Identifies a guest to remove from an object.
 #[derive(Clone, Debug)]
@@ -310,444 +233,190 @@ pub trait ObjectClient: 'static + Send + Sync {
     ) -> Result<HashMap<String, DateTime<Utc>>>;
 }
 
+// ============================================================================
+// OpenWarp 本地化 helpers
+// ============================================================================
+
+/// 合成 `RevisionAndLastEditor`,用当前时间作为 revision。OpenWarp 单机场景下
+/// 服务端 revision 协调被砍,本地写入即最终态。`last_editor_uid = None` 避免
+/// 让上层 `set_latest_revision_and_editor` 错误地把"当前编辑者"覆写成假数据。
+fn synth_revision_and_editor() -> RevisionAndLastEditor {
+    // `Revision::from(DateTime<Utc>)` 是 test-util feature gated;生产构建走
+    // `From<ServerTimestamp>` 路径。
+    RevisionAndLastEditor {
+        revision: Revision::from(ServerTimestamp::new(Utc::now())),
+        last_editor_uid: None,
+    }
+}
+
+/// 合成 `ServerPermissions` —— 一个"个人空间,无共享,无 guest"的 default 状态。
+/// OpenWarp 默认所有对象属于本地用户,不存在云端 sharing。
+fn synth_personal_permissions() -> ServerPermissions {
+    ServerPermissions {
+        space: Owner::User {
+            user_uid: crate::auth::UserUid::new(""),
+        },
+        guests: Vec::new(),
+        anyone_link_sharing: None,
+        permissions_last_updated_ts: ServerTimestamp::new(Utc::now()),
+    }
+}
+
+/// 合成 `CreatedCloudObject`,用于 A 类 `create_*` 方法的成功路径。
+/// 把 client_id 的 hash 提升为合成 server_id —— 但**这条 RPC 路径在 OpenWarp 不应
+/// 真正被走到**:UpdateManager 已短路到 `create_object`(纯本地)。残留的调用方只有
+/// `SyncQueue::create_object`(只在 `start_dequeueing` 触发时执行,本地化下队列基本
+/// 为空)。合成响应只是为了让残留路径不死锁,不应有逻辑副作用。
+fn synth_created_cloud_object(
+    request: &CreateObjectRequest,
+    id_type: ObjectIdType,
+) -> CreatedCloudObject {
+    // 从 client_id 派生 server_id:取 client_id 的 sqlite hash 字符串构造 ServerId。
+    // 这与 UpdateManager 把"无 server_id 的本地对象"用 SyncId::ClientId 表示语义一致 ——
+    // 这里强行升级到 server_id 仅是为了满足 trait 返回值需求,**不会**进入 CloudModel
+    // 的 server_id 索引(因为 UpdateManager.create_object 早就用 ClientId 注册了对象)。
+    let synthetic_id = ServerId::from_string_lossy(&request.client_id.to_hash());
+    CreatedCloudObject {
+        client_id: request.client_id,
+        revision_and_editor: synth_revision_and_editor(),
+        metadata_ts: ServerTimestamp::new(Utc::now()),
+        server_id_and_type: ServerIdAndType {
+            id: synthetic_id,
+            id_type,
+        },
+        creator_uid: None,
+        permissions: synth_personal_permissions(),
+    }
+}
+
+// ============================================================================
+// impl ObjectClient for ServerApi —— 全部本地化
+// ============================================================================
+
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl ObjectClient for ServerApi {
+    // ----- A 类:本地化合成成功响应 -----
+    //
+    // 调用图:
+    //   `CloudWorkflowModel::send_create_request` → `object_client.create_workflow`
+    //   仅来自 `UpdateManager::create_object_online`(OpenWarp 本地化后未调用)
+    //   或 `SyncQueue::create_object`(本地化场景队列基本为空)。
+    //   返回合成 Success 让任何残留路径走 success 分支。
+
     async fn create_workflow(
         &self,
         request: CreateObjectRequest,
     ) -> Result<CreateCloudObjectResult> {
-        let model = request
-            .serialized_model
-            .ok_or_else(|| anyhow!("missing model for creating workflow"))?;
-        let variables = CreateWorkflowVariables {
-            input: CreateWorkflowInput {
-                data: model.take(),
-                entrypoint: request.entrypoint.into(),
-                initial_folder_id: request.initial_folder_id.map(|folder_id| folder_id.into()),
-                owner: request.owner.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = CreateWorkflow::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.create_workflow {
-            CreateWorkflowResult::CreateWorkflowOutput(output) => {
-                let metadata = output.workflow.metadata;
-                let workflow_id: WorkflowId = metadata.uid.into_inner().into();
-
-                Ok(CreateCloudObjectResult::Success {
-                    created_cloud_object: CreatedCloudObject {
-                        client_id: request.client_id,
-                        revision_and_editor: RevisionAndLastEditor {
-                            revision: output.revision_ts.into(),
-                            last_editor_uid: metadata.last_editor_uid.map(|uid| uid.into_inner()),
-                        },
-                        metadata_ts: metadata.metadata_last_updated_ts,
-                        server_id_and_type: ServerIdAndType {
-                            id: workflow_id.to_server_id(),
-                            id_type: ObjectIdType::Workflow,
-                        },
-                        creator_uid: metadata.creator_uid.map(|uid| uid.into_inner()),
-                        permissions: output.workflow.permissions.try_into()?,
-                    },
-                })
-            }
-            CreateWorkflowResult::UserFacingError(e) => Ok(
-                CreateCloudObjectResult::UserFacingError(get_user_facing_error_message(e)),
-            ),
-            CreateWorkflowResult::Unknown => {
-                Err(anyhow!("Failed to create workflow due to unknown variant"))
-            }
-        }
+        Ok(CreateCloudObjectResult::Success {
+            created_cloud_object: synth_created_cloud_object(&request, ObjectIdType::Workflow),
+        })
     }
 
     async fn update_workflow(
         &self,
-        workflow_id: WorkflowId,
-        data: SerializedModel,
-        revision: Option<Revision>,
+        _workflow_id: WorkflowId,
+        _data: SerializedModel,
+        _revision: Option<Revision>,
     ) -> Result<UpdateCloudObjectResult<ServerWorkflow>> {
-        let variables = UpdateWorkflowVariables {
-            input: UpdateWorkflowInput {
-                data: data.model_as_str().to_owned(),
-                uid: cynic::Id::new(workflow_id),
-                revision_ts: revision.map(|r| r.into()),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UpdateWorkflow::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.update_workflow {
-            UpdateWorkflowResult::UpdateWorkflowOutput(output) => match output.update {
-                WorkflowUpdate::ObjectUpdateSuccess(success) => {
-                    Ok(UpdateCloudObjectResult::Success {
-                        revision_and_editor: RevisionAndLastEditor {
-                            revision: success.revision_ts.into(),
-                            last_editor_uid: Some(success.last_editor_uid.into_inner()),
-                        },
-                    })
-                }
-                WorkflowUpdate::WorkflowUpdateRejected(rejected) => {
-                    Ok(UpdateCloudObjectResult::Rejected {
-                        object: rejected.conflicting_workflow.try_into()?,
-                    })
-                }
-                WorkflowUpdate::Unknown => Err(anyhow!("WorkflowUpdate has unknown variant")),
-            },
-            UpdateWorkflowResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateWorkflowResult::Unknown => {
-                Err(anyhow!("Failed to update workflow due to unknown variant"))
-            }
-        }
+        // OpenWarp:仅来自 `update_object_online`(已短路)与 `SyncQueue::update_object`
+        // (本地化下不入队 update)。返回 Success 是安全的"已成功保存到本地" 语义。
+        Ok(UpdateCloudObjectResult::Success {
+            revision_and_editor: synth_revision_and_editor(),
+        })
     }
 
     async fn bulk_create_generic_string_objects(
         &self,
-        owner: Owner,
+        _owner: Owner,
         objects: &[BulkCreateGenericStringObjectsRequest],
     ) -> Result<BulkCreateCloudObjectResult> {
-        let variables = BulkCreateObjectsVariables {
-            input: BulkCreateObjectsInput {
-                generic_string_objects: Some(BulkCreateGenericStringObjectsInput {
-                    owner: owner.into(),
-                    objects: objects
-                        .iter()
-                        .map(|object| GenericStringObjectInput {
-                            client_id: cynic::Id::new(object.id.to_string()),
-                            serialized_model: object.serialized_model.model_as_str().to_owned(),
-                            format: object.format.into(),
-                            uniqueness_key: object
-                                .uniqueness_key
-                                .clone()
-                                .map(GenericStringObjectUniqueKey::into),
-                            initial_folder_id: object.initial_folder_id.map(FolderId::into),
-                            entrypoint: object.entrypoint.into(),
-                        })
-                        .collect(),
-                }),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = BulkCreateObjects::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.bulk_create_objects {
-            BulkCreateObjectsResult::BulkCreateObjectsOutput(output) => {
-                if let Some(gso_result) = output.generic_string_objects {
-                    let mut created_cloud_objects = Vec::new();
-                    for gso in gso_result.objects {
-                        let metadata = gso.generic_string_object.metadata;
-                        let uid = metadata.uid.into_inner();
-                        let object_id: GenericStringObjectId = uid.into();
-
-                        created_cloud_objects.push(CreatedCloudObject {
-                            client_id: ClientId::from_hash(&gso.client_id.into_inner())
-                                .ok_or_else(|| anyhow!("invalid client id"))?,
-                            revision_and_editor: RevisionAndLastEditor {
-                                revision: metadata.revision_ts.into(),
-                                last_editor_uid: metadata
-                                    .last_editor_uid
-                                    .map(|uid| uid.into_inner()),
-                            },
-                            metadata_ts: metadata.metadata_last_updated_ts,
-                            server_id_and_type: ServerIdAndType {
-                                id: object_id.to_server_id(),
-                                id_type: ObjectIdType::GenericStringObject,
-                            },
-                            creator_uid: metadata.creator_uid.map(|uid| uid.into_inner()),
-                            permissions: gso.generic_string_object.permissions.try_into()?,
-                        });
-                    }
-
-                    Ok(BulkCreateCloudObjectResult::Success {
-                        created_cloud_objects,
-                    })
-                } else {
-                    Err(anyhow!(
-                        "No generic string objects found in BulkCreateGenericStringObjectsOutput"
-                    ))
+        // OpenWarp:逐个合成 `CreatedCloudObject`。
+        let created_cloud_objects = objects
+            .iter()
+            .map(|object| {
+                let synthetic_id = ServerId::from_string_lossy(&object.id.to_hash());
+                CreatedCloudObject {
+                    client_id: object.id,
+                    revision_and_editor: synth_revision_and_editor(),
+                    metadata_ts: ServerTimestamp::new(Utc::now()),
+                    server_id_and_type: ServerIdAndType {
+                        id: synthetic_id,
+                        id_type: ObjectIdType::GenericStringObject,
+                    },
+                    creator_uid: None,
+                    permissions: synth_personal_permissions(),
                 }
-            }
-            BulkCreateObjectsResult::UserFacingError(e) => match e.error {
-                UserFacingErrorInterface::GenericStringObjectUniqueKeyConflict(_) => {
-                    Ok(BulkCreateCloudObjectResult::GenericStringObjectUniqueKeyConflict)
-                }
-                _ => Err(anyhow!(get_user_facing_error_message(e))),
-            },
-            BulkCreateObjectsResult::Unknown => Err(anyhow!(
-                "Failed to bulk create objects due to unknown variant"
-            )),
-        }
+            })
+            .collect();
+        Ok(BulkCreateCloudObjectResult::Success {
+            created_cloud_objects,
+        })
     }
 
     async fn create_generic_string_object(
         &self,
-        format: GenericStringObjectFormat,
-        uniqueness_key: Option<GenericStringObjectUniqueKey>,
+        _format: GenericStringObjectFormat,
+        _uniqueness_key: Option<GenericStringObjectUniqueKey>,
         request: CreateObjectRequest,
     ) -> Result<CreateCloudObjectResult> {
-        let model = request
-            .serialized_model
-            .ok_or_else(|| anyhow!("missing model for creating generic string model"))?;
-        let variables = CreateGenericStringObjectVariables {
-            input: CreateGenericStringObjectInput {
-                generic_string_object: GenericStringObjectInput {
-                    client_id: cynic::Id::new(request.client_id.to_hash()),
-                    entrypoint: request.entrypoint.into(),
-                    format: format.into(),
-                    initial_folder_id: request.initial_folder_id.map(|folder_id| folder_id.into()),
-                    serialized_model: model.take(),
-                    uniqueness_key: uniqueness_key.map(|key| key.into()),
-                },
-                owner: request.owner.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = CreateGenericStringObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.create_generic_string_object {
-            CreateGenericStringObjectResult::CreateGenericStringObjectOutput(output) => {
-                let metadata = output.generic_string_object.metadata;
-                let gso_id: GenericStringObjectId = metadata.uid.into_inner().into();
-
-                Ok(CreateCloudObjectResult::Success {
-                    created_cloud_object: CreatedCloudObject {
-                        revision_and_editor: RevisionAndLastEditor {
-                            revision: output.revision_ts.into(),
-                            last_editor_uid: metadata.last_editor_uid.map(|uid| uid.into_inner()),
-                        },
-                        metadata_ts: metadata.metadata_last_updated_ts,
-                        server_id_and_type: ServerIdAndType {
-                            id: gso_id.to_server_id(),
-                            id_type: ObjectIdType::GenericStringObject,
-                        },
-                        creator_uid: metadata.creator_uid.map(|uid| uid.into_inner()),
-                        client_id: request.client_id,
-                        permissions: output.generic_string_object.permissions.try_into()?,
-                    },
-                })
-            }
-            CreateGenericStringObjectResult::UserFacingError(e) => Ok(match e.error {
-                UserFacingErrorInterface::GenericStringObjectUniqueKeyConflict(_) => {
-                    CreateCloudObjectResult::GenericStringObjectUniqueKeyConflict
-                }
-                _ => CreateCloudObjectResult::UserFacingError(get_user_facing_error_message(e)),
-            }),
-            CreateGenericStringObjectResult::Unknown => Err(anyhow!(
-                "Failed to create generic string object due to unknown variant"
-            )),
-        }
+        Ok(CreateCloudObjectResult::Success {
+            created_cloud_object: synth_created_cloud_object(
+                &request,
+                ObjectIdType::GenericStringObject,
+            ),
+        })
     }
 
     async fn create_notebook(
         &self,
         request: CreateObjectRequest,
     ) -> Result<CreateCloudObjectResult> {
-        let serialized = request
-            .serialized_model
-            .as_ref()
-            .ok_or_else(|| anyhow!("Missing serialized model for notebook"))?;
-
-        let notebook: SerializedNotebook = serde_json::from_str(serialized.model_as_str())
-            .context("Failed to deserialize notebook model")?;
-
-        let ai_document_id = notebook
-            .ai_document_id
-            .and_then(|id| AIDocumentId::try_from(id).ok());
-
-        let variables = CreateNotebookVariables {
-            input: CreateNotebookInput {
-                data: Some(notebook.data),
-                entrypoint: request.entrypoint.into(),
-                initial_folder_id: request.initial_folder_id.map(|folder_id| folder_id.into()),
-                owner: request.owner.into(),
-                title: request.title,
-                ai_document_id: ai_document_id.map(|id| id.to_string()),
-                conversation_id: notebook.conversation_id,
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = CreateNotebook::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.create_notebook {
-            CreateNotebookResult::CreateNotebookOutput(output) => {
-                let metadata = output.notebook.metadata;
-                let notebook_id: NotebookId = metadata.uid.into_inner().into();
-
-                Ok(CreateCloudObjectResult::Success {
-                    created_cloud_object: CreatedCloudObject {
-                        client_id: request.client_id,
-                        revision_and_editor: RevisionAndLastEditor {
-                            revision: output.revision_ts.into(),
-                            last_editor_uid: metadata.last_editor_uid.map(|uid| uid.into_inner()),
-                        },
-                        metadata_ts: metadata.metadata_last_updated_ts,
-                        server_id_and_type: ServerIdAndType {
-                            id: notebook_id.to_server_id(),
-                            id_type: ObjectIdType::Notebook,
-                        },
-                        creator_uid: metadata.creator_uid.map(|uid| uid.into_inner()),
-                        permissions: output.notebook.permissions.try_into()?,
-                    },
-                })
-            }
-            CreateNotebookResult::UserFacingError(e) => Ok(
-                CreateCloudObjectResult::UserFacingError(get_user_facing_error_message(e)),
-            ),
-            CreateNotebookResult::Unknown => {
-                Err(anyhow!("Failed to create notebook due to unknown variant"))
-            }
-        }
+        Ok(CreateCloudObjectResult::Success {
+            created_cloud_object: synth_created_cloud_object(&request, ObjectIdType::Notebook),
+        })
     }
 
     async fn update_notebook(
         &self,
-        notebook_id: NotebookId,
-        title: Option<String>,
-        data: Option<SerializedModel>,
-        revision: Option<Revision>,
+        _notebook_id: NotebookId,
+        _title: Option<String>,
+        _data: Option<SerializedModel>,
+        _revision: Option<Revision>,
     ) -> Result<UpdateCloudObjectResult<ServerNotebook>> {
-        let variables = UpdateNotebookVariables {
-            input: UpdateNotebookInput {
-                data: data.map(|data| data.model_as_str().to_owned()),
-                title,
-                uid: cynic::Id::new(notebook_id),
-                revision_ts: revision.map(|r| r.into()),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UpdateNotebook::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.update_notebook {
-            UpdateNotebookResult::UpdateNotebookOutput(output) => match output.update {
-                NotebookUpdate::ObjectUpdateSuccess(success) => {
-                    Ok(UpdateCloudObjectResult::Success {
-                        revision_and_editor: RevisionAndLastEditor {
-                            revision: success.revision_ts.into(),
-                            last_editor_uid: Some(success.last_editor_uid.into_inner()),
-                        },
-                    })
-                }
-                NotebookUpdate::NotebookUpdateRejected(rejected) => {
-                    Ok(UpdateCloudObjectResult::Rejected {
-                        object: rejected.conflicting_notebook.try_into()?,
-                    })
-                }
-                NotebookUpdate::Unknown => Err(anyhow!("NotebookUpdate has unknown variant")),
-            },
-            UpdateNotebookResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateNotebookResult::Unknown => {
-                Err(anyhow!("Failed to update notebook due to unknown variant"))
-            }
-        }
+        Ok(UpdateCloudObjectResult::Success {
+            revision_and_editor: synth_revision_and_editor(),
+        })
     }
 
     async fn create_folder(&self, request: CreateObjectRequest) -> Result<CreateCloudObjectResult> {
-        let model = request
-            .serialized_model
-            .ok_or_else(|| anyhow!("missing serialized model for creating folder"))?;
-        let variables = CreateFolderVariables {
-            input: CreateFolderInput {
-                initial_folder_id: request.initial_folder_id.map(|folder_id| folder_id.into()),
-                name: model.take(),
-                owner: request.owner.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = CreateFolder::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.create_folder {
-            CreateFolderResult::CreateFolderOutput(output) => {
-                let metadata = output.folder.metadata;
-                let folder_id: FolderId = metadata.uid.into_inner().into();
-
-                Ok(CreateCloudObjectResult::Success {
-                    created_cloud_object: CreatedCloudObject {
-                        client_id: request.client_id,
-                        revision_and_editor: RevisionAndLastEditor {
-                            revision: metadata.revision_ts.into(),
-                            last_editor_uid: metadata.last_editor_uid.map(|uid| uid.into_inner()),
-                        },
-                        metadata_ts: metadata.metadata_last_updated_ts,
-                        server_id_and_type: ServerIdAndType {
-                            id: folder_id.to_server_id(),
-                            id_type: ObjectIdType::Folder,
-                        },
-                        creator_uid: metadata.creator_uid.map(|uid| uid.into_inner()),
-                        permissions: output.folder.permissions.try_into()?,
-                    },
-                })
-            }
-            CreateFolderResult::UserFacingError(e) => Ok(CreateCloudObjectResult::UserFacingError(
-                get_user_facing_error_message(e),
-            )),
-            CreateFolderResult::Unknown => {
-                Err(anyhow!("Failed to create folder due to unknown variant"))
-            }
-        }
+        Ok(CreateCloudObjectResult::Success {
+            created_cloud_object: synth_created_cloud_object(&request, ObjectIdType::Folder),
+        })
     }
 
     async fn update_folder(
         &self,
-        folder_id: FolderId,
-        name: SerializedModel,
+        _folder_id: FolderId,
+        _name: SerializedModel,
     ) -> Result<UpdateCloudObjectResult<ServerFolder>> {
-        let variables = UpdateFolderVariables {
-            input: UpdateFolderInput {
-                uid: cynic::Id::new(folder_id),
-                name: name.model_as_str().to_owned(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UpdateFolder::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.update_folder {
-            UpdateFolderResult::UpdateFolderOutput(output) => output.update.try_into(),
-            UpdateFolderResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateFolderResult::Unknown => {
-                Err(anyhow!("Failed to update folder due to unknown variant"))
-            }
-        }
+        Ok(UpdateCloudObjectResult::Success {
+            revision_and_editor: synth_revision_and_editor(),
+        })
     }
 
     async fn update_generic_string_object(
         &self,
-        object_id: GenericStringObjectId,
-        model: SerializedModel,
-        revision: Option<Revision>,
+        _object_id: GenericStringObjectId,
+        _model: SerializedModel,
+        _revision: Option<Revision>,
     ) -> Result<UpdateCloudObjectResult<Box<dyn ServerObject>>> {
-        let variables = UpdateGenericStringObjectVariables {
-            input: UpdateGenericStringObjectInput {
-                revision_ts: revision.map(|r| r.into()),
-                serialized_model: model.model_as_str().to_owned(),
-                uid: object_id.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UpdateGenericStringObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        response.update_generic_string_object.try_into()
+        Ok(UpdateCloudObjectResult::Success {
+            revision_and_editor: synth_revision_and_editor(),
+        })
     }
+
+    // ----- C 类:notebook 编辑权 —— Wave1-2 已 stub -----
 
     async fn grab_notebook_edit_access(&self, _notebook_id: NotebookId) -> Result<ServerMetadata> {
         // OpenWarp Wave1-2:本地单机无多人编辑锁(notebook editing baton),返回 Err
@@ -765,529 +434,131 @@ impl ObjectClient for ServerApi {
         &self,
         _notebook_id: NotebookId,
     ) -> Result<ServerMetadata> {
-        // OpenWarp Wave1-2:同上。与 grab_notebook_edit_access 对称,本地无并发编辑者,
-        // 上层 RequestFailed 分支只记日志,乐观释放已在本地生效。
+        // OpenWarp Wave1-2:同上。与 grab_notebook_edit_access 对称。
         Err(anyhow!(
             "Notebook multi-editor lock is disabled in OpenWarp"
         ))
     }
 
-    // OpenWarp(本地化,Phase 2d-4a-1):原 `get_warp_drive_updates` GraphQL Subscription 实现
-    // 与 `Listener` / `ObjectUpdateMessage` 一同物理删除。在本地化零云请求场景下代码路径不可达。
+    // ----- C 类:fetch_changed_objects / fetch_single_cloud_object -----
 
     async fn fetch_changed_objects(
         &self,
-        objects_to_update: ObjectsToUpdate,
-        force_refresh: bool,
+        _objects_to_update: ObjectsToUpdate,
+        _force_refresh: bool,
     ) -> Result<InitialLoadResponse> {
-        log::info!("fetching updated cloud objects");
-        if force_refresh {
-            log::info!("forcing sync of all objects")
-        }
-
-        let variables = GetUpdatedCloudObjectsVariables {
-            input: UpdatedCloudObjectsInput {
-                folders: Some(objects_to_update.folders),
-                force_refresh,
-                generic_string_objects: Some(objects_to_update.generic_string_objects),
-                notebooks: Some(objects_to_update.notebooks),
-                workflows: Some(objects_to_update.workflows),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = GetUpdatedCloudObjects::build(variables);
-        let response_data = self.send_graphql_request(operation, None).await?;
-
-        match response_data.updated_cloud_objects {
-            UpdatedCloudObjectsResult::UpdatedCloudObjectsOutput(output) => {
-                let updated_notebooks = output
-                    .notebooks
-                    .map(|notebooks| {
-                        notebooks
-                            .into_iter()
-                            .filter_map(|notebook| {
-                                ServerNotebook::try_from_graphql_fields(
-                                    ServerId::from_string_lossy(notebook.metadata.uid.inner()),
-                                    Some(notebook.title),
-                                    Some(notebook.data),
-                                    notebook.ai_document_id,
-                                    notebook.metadata.try_into().ok()?,
-                                    notebook.permissions.try_into().ok()?,
-                                )
-                                .ok()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let updated_workflows = output
-                    .workflows
-                    .map(|workflows| {
-                        workflows
-                            .into_iter()
-                            .filter_map(|workflow| {
-                                ServerWorkflow::try_from_graphql_fields(
-                                    ServerId::from_string_lossy(workflow.metadata.uid.inner()),
-                                    workflow.data,
-                                    workflow.metadata.try_into().ok()?,
-                                    workflow.permissions.try_into().ok()?,
-                                )
-                                .ok()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let updated_folders = output
-                    .folders
-                    .map(|folders| {
-                        folders
-                            .into_iter()
-                            .filter_map(|folder| {
-                                ServerFolder::try_from_graphql_fields(
-                                    ServerId::from_string_lossy(folder.metadata.uid.inner()),
-                                    Some(folder.name),
-                                    folder.metadata.try_into().ok()?,
-                                    folder.permissions.try_into().ok()?,
-                                    folder.is_warp_pack,
-                                )
-                                .ok()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let mut updated_generic_string_objects = HashMap::new();
-                if let Some(objects) = output.generic_string_objects {
-                    for gso in objects {
-                        let uid = gso.metadata.uid.inner().to_string();
-                        let server_id = ServerId::from_string_lossy(&uid);
-
-                        let metadata = match ServerMetadata::try_from(gso.metadata) {
-                            Ok(metadata) => metadata,
-                            Err(err) => {
-                                report_error!(err.context(format!(
-                                    "Failed to convert metadata for GSO {:?} {uid}",
-                                    gso.format
-                                )));
-                                continue;
-                            }
-                        };
-
-                        let permissions = match ServerPermissions::try_from(gso.permissions) {
-                            Ok(permissions) => permissions,
-                            Err(err) => {
-                                report_error!(err.context(format!(
-                                    "Failed to convert permissions for GSO {:?} {uid}",
-                                    gso.format
-                                )));
-                                continue;
-                            }
-                        };
-
-                        match gso.format {
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonEnvVarCollection => {
-                                parse_server_gso::<EnvVarCollection, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::EnvVarCollection),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonPreference => {
-                                parse_server_gso::<Preference, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::Preference),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonWorkflowEnum => {
-                                parse_server_gso::<WorkflowEnum, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::WorkflowEnum),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonAIFact => {
-                                parse_server_gso::<AIFact, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::AIFact),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonMCPServer => {
-                                parse_server_gso::<MCPServer, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::MCPServer),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonAIExecutionProfile => {
-                                parse_server_gso::<AIExecutionProfile, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::AIExecutionProfile),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonTemplatableMCPServer => {
-                                parse_server_gso::<TemplatableMCPServer, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::TemplatableMCPServer),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonCloudEnvironment => {
-                                parse_server_gso::<AmbientAgentEnvironment, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::CloudEnvironment),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                            warp_graphql::generic_string_object::GenericStringObjectFormat::JsonScheduledAmbientAgent => {
-                                parse_server_gso::<ScheduledAmbientAgent, JsonSerializer>(
-                                    &mut updated_generic_string_objects,
-                                    GenericStringObjectFormat::Json(JsonObjectType::ScheduledAmbientAgent),
-                                    server_id,
-                                    metadata,
-                                    permissions,
-                                    gso.serialized_model,
-                                );
-                            }
-                        }
-                    }
-                }
-
-                let deleted_notebooks: Vec<NotebookId> = output
-                    .deleted_object_uids
-                    .notebook_uids
-                    .map(|uids| {
-                        uids.into_iter()
-                            .map(|uid| uid.into_inner().into())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let deleted_workflows: Vec<WorkflowId> = output
-                    .deleted_object_uids
-                    .workflow_uids
-                    .map(|uids| {
-                        uids.into_iter()
-                            .map(|uid| uid.into_inner().into())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let deleted_folders: Vec<FolderId> = output
-                    .deleted_object_uids
-                    .folder_uids
-                    .map(|uids| {
-                        uids.into_iter()
-                            .map(|uid| uid.into_inner().into())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let deleted_generic_string_objects: Vec<GenericStringObjectId> = output
-                    .deleted_object_uids
-                    .generic_string_object_uids
-                    .map(|uids| {
-                        uids.into_iter()
-                            .map(|uid| uid.into_inner().into())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let user_profiles: Vec<UserProfileWithUID> = output
-                    .user_profiles
-                    .map(|user_profiles| {
-                        user_profiles
-                            .into_iter()
-                            .map(|profile| profile.into())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let action_histories: Vec<ObjectActionHistory> = output
-                    .action_histories
-                    .map(|histories| {
-                        histories
-                            .into_iter()
-                            .filter_map(|history| history.try_into().ok())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let mcp_gallery = output.mcp_gallery.unwrap_or_default();
-
-                let response = InitialLoadResponse {
-                    updated_notebooks,
-                    deleted_notebooks,
-                    updated_workflows,
-                    deleted_workflows,
-                    updated_folders,
-                    deleted_folders,
-                    updated_generic_string_objects,
-                    deleted_generic_string_objects,
-                    user_profiles,
-                    action_histories,
-                    mcp_gallery,
-                };
-                Ok(response)
-            }
-            UpdatedCloudObjectsResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdatedCloudObjectsResult::Unknown => Err(anyhow!(
-                "Failed to get updated cloud objects due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave 2-1:无云端拉取,返回空响应。
+        // 上层 `on_changed_objects_fetched` 会用空数据 mark `has_initial_load`,
+        // 然后启动 SyncQueue dequeueing(队列本地化下为空 = no-op),完整链路平稳。
+        Ok(InitialLoadResponse {
+            updated_notebooks: Vec::new(),
+            deleted_notebooks: Vec::new(),
+            updated_workflows: Vec::new(),
+            deleted_workflows: Vec::new(),
+            updated_folders: Vec::new(),
+            deleted_folders: Vec::new(),
+            updated_generic_string_objects: HashMap::new(),
+            deleted_generic_string_objects: Vec::new(),
+            user_profiles: Vec::new(),
+            action_histories: Vec::new(),
+            mcp_gallery: Vec::new(),
+        })
     }
 
-    async fn fetch_single_cloud_object(&self, id: ServerId) -> Result<GetCloudObjectResponse> {
-        let variables = GetCloudObjectVariables {
-            input: CloudObjectInput {
-                uid: cynic::Id::new(id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = GetCloudObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.cloud_object {
-            CloudObjectResult::CloudObjectOutput(output) => {
-                let object: ServerCloudObject = output.object.clone().try_into()?;
-                let action_histories: Vec<ObjectActionHistory> = output
-                    .action_histories
-                    .map(|histories| {
-                        histories
-                            .into_iter()
-                            .filter_map(|history| history.try_into().ok())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let descendants = match output.object {
-                    CloudObjectWithDescendants::FolderWithDescendants(folder) => folder
-                        .descendants
-                        .into_iter()
-                        .filter_map(|descendant| descendant.try_into().ok())
-                        .collect(),
-                    _ => vec![],
-                };
-
-                Ok(GetCloudObjectResponse {
-                    object,
-                    action_histories,
-                    descendants,
-                })
-            }
-            CloudObjectResult::UserFacingError(e) => Err(anyhow!(get_user_facing_error_message(e))),
-            CloudObjectResult::Unknown => Err(anyhow!(
-                "Failed to fetch single cloud object due to unknown variant"
-            )),
-        }
+    async fn fetch_single_cloud_object(&self, _id: ServerId) -> Result<GetCloudObjectResponse> {
+        // OpenWarp Wave 2-1:无云端单对象拉取。调用方 (search / SharedWithMe UI) 在
+        // 本地化下已无入口,Err 让残留调用直接 surface 错误而不是返回假数据。
+        Err(anyhow!("Single cloud object fetch is disabled in OpenWarp"))
     }
 
-    async fn transfer_notebook_owner(&self, notebook_id: NotebookId, owner: Owner) -> Result<bool> {
-        let variables = TransferNotebookOwnerVariables {
-            input: TransferNotebookOwnerInput {
-                uid: cynic::Id::new(notebook_id),
-                owner: owner.into(),
-            },
-            request_context: get_request_context(),
-        };
+    // ----- C 类:owner transfer —— no-op 成功 -----
 
-        let operation = TransferNotebookOwner::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.transfer_notebook_owner {
-            TransferNotebookOwnerResult::TransferNotebookOwnerOutput(output) => Ok(output.success),
-            _ => Ok(false),
-        }
+    async fn transfer_notebook_owner(
+        &self,
+        _notebook_id: NotebookId,
+        _owner: Owner,
+    ) -> Result<bool> {
+        // OpenWarp Wave 2-1:单机无 owner 概念,no-op Ok 让 UpdateManager 完成本地状态机。
+        Ok(true)
     }
 
-    async fn transfer_workflow_owner(&self, workflow_id: WorkflowId, owner: Owner) -> Result<bool> {
-        let variables = TransferWorkflowOwnerVariables {
-            input: TransferWorkflowOwnerInput {
-                uid: cynic::Id::new(workflow_id),
-                owner: owner.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = TransferWorkflowOwner::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.transfer_workflow_owner {
-            TransferWorkflowOwnerResult::TransferWorkflowOwnerOutput(output) => Ok(output.success),
-            _ => Ok(false),
-        }
+    async fn transfer_workflow_owner(
+        &self,
+        _workflow_id: WorkflowId,
+        _owner: Owner,
+    ) -> Result<bool> {
+        Ok(true)
     }
 
     async fn transfer_generic_string_object_owner(
         &self,
-        gso_id: GenericStringObjectId,
-        owner: Owner,
+        _gso_id: GenericStringObjectId,
+        _owner: Owner,
     ) -> Result<bool> {
-        let variables = TransferGenericStringObjectOwnerVariables {
-            input: TransferGenericStringObjectOwnerInput {
-                uid: cynic::Id::new(gso_id),
-                owner: owner.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = TransferGenericStringObjectOwner::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.transfer_generic_string_object_owner {
-            TransferGenericStringObjectOwnerResult::TransferGenericStringObjectOwnerOutput(
-                output,
-            ) => Ok(output.success),
-            _ => Ok(false),
-        }
+        Ok(true)
     }
 
-    async fn trash_object(&self, id: ServerId) -> Result<bool> {
-        let variables = TrashObjectVariables {
-            input: TrashObjectInput {
-                uid: cynic::Id::new(id),
-            },
-            request_context: get_request_context(),
-        };
+    // ----- B 类:trash / untrash / delete / empty_trash / move -----
+    //
+    // UpdateManager 中有 server_id 的对象路径会走这条 RPC(本地化场景下偶发:
+    // 旧云端同步过来的对象的 trash 操作)。返回 `Ok(成功)` 让上层 RequestSucceeded
+    // 分支清 `has_pending_metadata_change`、写 sqlite,与"无 server_id"短路腿对齐。
 
-        let operation = TrashObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        let success = match response.trash_object {
-            TrashObjectResult::TrashObjectOutput(output) => output.success,
-            _ => false,
-        };
-        Ok(success)
+    async fn trash_object(&self, _id: ServerId) -> Result<bool> {
+        // OpenWarp:本地 trash 已由 UpdateManager 短路腿完成内存 + sqlite 写入。
+        // 这里仅是带 server_id 对象走 RPC 时的"假成功",上层会清 pending 状态。
+        Ok(true)
     }
 
     async fn untrash_object(&self, id: ServerId) -> Result<ObjectMetadataUpdateResult> {
-        let variables = UntrashObjectVariables {
-            input: UntrashObjectInput {
-                uid: cynic::Id::new(id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UntrashObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        let result = match response.untrash_object {
-            warp_graphql::mutations::untrash_object::UntrashObjectResult::UntrashObjectOutput(
-                output,
-            ) => {
-                if output.success {
-                    ObjectMetadataUpdateResult::Success {
-                        metadata: Box::new(output.metadata.try_into()?),
-                    }
-                } else {
-                    ObjectMetadataUpdateResult::Failure
-                }
-            }
-            _ => ObjectMetadataUpdateResult::Failure,
-        };
-        Ok(result)
+        // OpenWarp:返回 Success + 合成 metadata。上层 RequestSucceeded 分支
+        // 会用返回值更新本地内存。我们合成一个"清空 trashed_ts"的 metadata —
+        // 这就是 untrash 的预期效果。
+        Ok(ObjectMetadataUpdateResult::Success {
+            metadata: Box::new(ServerMetadata {
+                uid: id,
+                revision: Revision::from(ServerTimestamp::new(Utc::now())),
+                metadata_last_updated_ts: ServerTimestamp::new(Utc::now()),
+                trashed_ts: None,
+                folder_id: None,
+                is_welcome_object: false,
+                creator_uid: None,
+                last_editor_uid: None,
+                current_editor_uid: None,
+            }),
+        })
     }
 
     async fn delete_object(&self, id: ServerId) -> Result<ObjectDeleteResult> {
-        let variables = DeleteObjectVariables {
-            input: DeleteObjectInput {
-                uid: cynic::Id::new(id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = DeleteObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        let status = match response.delete_object {
-            DeleteObjectResult::DeleteObjectOutput(output) => {
-                let mut deleted_ids: Vec<SyncId> = Vec::new();
-                for uid in output.deleted_uids {
-                    deleted_ids.push(SyncId::ServerId(ServerId::from_string_lossy(uid.inner())))
-                }
-                ObjectDeleteResult::Success { deleted_ids }
-            }
-            _ => ObjectDeleteResult::Failure,
-        };
-        Ok(status)
+        // OpenWarp:仅返回单个 server_id 已删除。UpdateManager 的本地腿已经做了
+        // 内存 + sqlite 删除,这里的 deleted_ids 用于上层 `on_object_delete_success`
+        // 做 actions 清理与 ObjectOperationComplete 事件 emit。
+        Ok(ObjectDeleteResult::Success {
+            deleted_ids: vec![SyncId::ServerId(id)],
+        })
     }
 
-    async fn empty_trash(&self, owner: Owner) -> Result<ObjectDeleteResult> {
-        let variables = EmptyTrashVariables {
-            input: EmptyTrashInput {
-                owner: owner.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = EmptyTrash::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        let status = match response.empty_trash {
-            EmptyTrashResult::EmptyTrashOutput(output) => {
-                let mut deleted_ids: Vec<SyncId> = Vec::new();
-                for uid in output.deleted_uids {
-                    deleted_ids.push(SyncId::ServerId(ServerId::from_string_lossy(
-                        uid.into_inner(),
-                    )))
-                }
-                ObjectDeleteResult::Success { deleted_ids }
-            }
-            _ => ObjectDeleteResult::Failure,
-        };
-        Ok(status)
+    async fn empty_trash(&self, _owner: Owner) -> Result<ObjectDeleteResult> {
+        // OpenWarp:Empty Trash 在 UpdateManager 中已纯本地化(遍历 CloudModel 找
+        // owner 匹配 + is_trashed 后调 `on_object_delete_success`),此 RPC 路径
+        // 不会被走到。返回空 deleted_ids 仅为类型兼容。
+        Ok(ObjectDeleteResult::Success {
+            deleted_ids: Vec::new(),
+        })
     }
 
     async fn move_object(
         &self,
-        id: ServerId,
-        folder_id: Option<FolderId>,
-        owner: Owner,
-        object_type: ObjectType,
+        _id: ServerId,
+        _folder_id: Option<FolderId>,
+        _owner: Owner,
+        _object_type: ObjectType,
     ) -> Result<bool> {
-        let variables = MoveObjectVariables {
-            input: MoveObjectInput {
-                new_folder_uid: folder_id.map(cynic::Id::new),
-                new_owner: owner.into(),
-                object_type: object_type.into(),
-                uid: cynic::Id::new(id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = MoveObject::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.move_object {
-            MoveObjectResult::MoveObjectOutput(output) => Ok(output.success),
-            MoveObjectResult::UserFacingError(e) => Err(anyhow!(get_user_facing_error_message(e))),
-            MoveObjectResult::Unknown => {
-                Err(anyhow!("Failed to move object due to unknown variant"))
-            }
-        }
+        // OpenWarp:no-op 成功。上层 RequestSucceeded 分支清 pending 状态。
+        Ok(true)
     }
+
+    // ----- C 类:record_object_action / leave_object —— Wave1-2 已 stub -----
 
     async fn record_object_action(
         &self,
@@ -1312,130 +583,45 @@ impl ObjectClient for ServerApi {
         Err(anyhow!("Leave shared object is disabled in OpenWarp"))
     }
 
+    // ----- C 类:link / guest sharing —— no-op 成功 -----
+
     async fn set_object_link_permissions(
         &self,
-        object_id: ServerId,
-        access_level: SharingAccessLevel,
+        _object_id: ServerId,
+        _access_level: SharingAccessLevel,
     ) -> Result<ObjectPermissionUpdateResult> {
-        let variables = SetObjectLinkPermissionsVariables {
-            input: SetObjectLinkPermissionsInput {
-                uid: cynic::Id::new(object_id),
-                access_level: access_level.into(),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = SetObjectLinkPermissions::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.set_object_link_permissions {
-            SetObjectLinkPermissionsResult::SetObjectLinkPermissionsOutput(_) => {
-                Ok(ObjectPermissionUpdateResult::Success)
-            }
-            SetObjectLinkPermissionsResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            SetObjectLinkPermissionsResult::Unknown => Err(anyhow!(
-                "Failed to set object link permissions due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave 2-1:云端 link sharing 已下线。UI 入口(Drive sharing modal)
+        // 在 Phase 2a 已删,残留 trait 仅 stub 不可达。
+        Ok(ObjectPermissionUpdateResult::Success)
     }
 
     async fn remove_object_link_permissions(
         &self,
-        object_id: ServerId,
+        _object_id: ServerId,
     ) -> Result<ObjectPermissionUpdateResult> {
-        let variables = RemoveObjectLinkPermissionsVariables {
-            input: RemoveObjectLinkPermissionsInput {
-                uid: cynic::Id::new(object_id),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = RemoveObjectLinkPermissions::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-        match response.remove_object_link_permissions {
-            RemoveObjectLinkPermissionsResult::RemoveObjectLinkPermissionsOutput(_) => {
-                Ok(ObjectPermissionUpdateResult::Success)
-            }
-            RemoveObjectLinkPermissionsResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            RemoveObjectLinkPermissionsResult::Unknown => Err(anyhow!(
-                "Failed to remove object link permissions due to unknown variant"
-            )),
-        }
+        Ok(ObjectPermissionUpdateResult::Success)
     }
 
     async fn add_object_guests(
         &self,
-        object_id: ServerId,
-        guest_emails: Vec<String>,
-        access_level: AccessLevel,
+        _object_id: ServerId,
+        _guest_emails: Vec<String>,
+        _access_level: AccessLevel,
     ) -> Result<ObjectPermissionsUpdateData> {
-        let variables = AddObjectGuestsVariables {
-            input: AddObjectGuestsInput {
-                object_uid: cynic::Id::new(object_id),
-                access_level,
-                user_emails: guest_emails,
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = AddObjectGuests::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.add_object_guests {
-            AddObjectGuestsResult::AddObjectGuestsOutput(output) => {
-                let permissions = output.object_permissions.try_into()?;
-                let profiles = output
-                    .user_profiles
-                    .into_iter()
-                    .flatten()
-                    .map(Into::into)
-                    .collect();
-                Ok(ObjectPermissionsUpdateData {
-                    permissions,
-                    profiles,
-                })
-            }
-            AddObjectGuestsResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            AddObjectGuestsResult::Unknown => Err(anyhow!(
-                "Failed to add object guests due to unknown variant"
-            )),
-        }
+        // OpenWarp Wave 2-1:无 guest 概念,返回空 permissions + 空 profiles。
+        Ok(ObjectPermissionsUpdateData {
+            permissions: synth_personal_permissions(),
+            profiles: Vec::new(),
+        })
     }
 
     async fn update_object_guests(
         &self,
-        object_id: ServerId,
-        guest_emails: Vec<String>,
-        access_level: AccessLevel,
+        _object_id: ServerId,
+        _guest_emails: Vec<String>,
+        _access_level: AccessLevel,
     ) -> Result<ServerPermissions> {
-        let variables = UpdateObjectGuestsVariables {
-            input: UpdateObjectGuestsInput {
-                object_uid: cynic::Id::new(object_id),
-                access_level,
-                emails: Some(guest_emails),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UpdateObjectGuests::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.update_object_guests {
-            UpdateObjectGuestsResult::UpdateObjectGuestsOutput(output) => {
-                Ok(output.object_permissions.try_into()?)
-            }
-            UpdateObjectGuestsResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateObjectGuestsResult::Unknown => Err(anyhow!(
-                "Failed to update object guests due to unknown variant"
-            )),
-        }
+        Ok(synth_personal_permissions())
     }
 
     async fn remove_object_guest(
@@ -1457,29 +643,5 @@ impl ObjectClient for ServerApi {
         // "最后使用"时间戳。返回空表,UpdateManager::fetch_and_merge_environment_timestamps
         // 会以空 HashMap 走 update_environment_last_task_run_timestamps,无副作用。
         Ok(HashMap::new())
-    }
-}
-
-/// Parse the serialized model for a GSO and add it to the format-specific entry in `map`,
-/// or report an error if parsing fails.
-fn parse_server_gso<T, S>(
-    map: &mut HashMap<GenericStringObjectFormat, Vec<Box<dyn ServerObject>>>,
-    format: GenericStringObjectFormat,
-    uid: ServerId,
-    metadata: ServerMetadata,
-    permissions: ServerPermissions,
-    serialized_model: String,
-) where
-    T: StringModel<
-        CloudObjectType = GenericCloudObject<GenericStringObjectId, GenericStringModel<T, S>>,
-    >,
-    S: Serializer<T>,
-{
-    match GenericServerObject::<GenericStringObjectId, GenericStringModel<T, S>>::try_from_graphql_fields(uid, Some(serialized_model), metadata, permissions)
-    {
-        Ok(object) => {
-            map.entry(format).or_default().push(Box::new(object));
-        }
-        Err(err) => report_error!(err.context(format!("Failed to convert {format:?} {uid}"))),
     }
 }

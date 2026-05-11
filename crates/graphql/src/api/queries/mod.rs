@@ -1,6 +1,7 @@
 pub mod api_keys;
 pub mod get_cloud_environments;
-pub mod get_cloud_object;
+// OpenWarp Wave 2-1:`get_cloud_object` query 唯一消费方
+// `ObjectClient::fetch_single_cloud_object` 已本地化为 Err stub,文件物理删除。
 //
 // OpenWarp Wave 2-2:再删 6 个 AI query —
 // `free_available_models` / `get_feature_model_choices` / `get_request_limit_info`
