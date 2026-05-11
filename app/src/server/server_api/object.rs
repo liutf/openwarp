@@ -7,7 +7,6 @@ use crate::{
         facts::AIFact,
         mcp::{MCPServer, TemplatableMCPServer},
     },
-    channel::ChannelState,
     cloud_object::{
         model::{
             actions::{ObjectActionHistory, ObjectActionType},
@@ -28,13 +27,10 @@ use crate::{
     env_vars::EnvVarCollection,
     notebooks::{NotebookId, SerializedNotebook},
     server::{
-        cloud_objects::{
-            listener::ObjectUpdateMessage,
-            update_manager::{GetCloudObjectResponse, InitialLoadResponse},
-        },
+        cloud_objects::update_manager::{GetCloudObjectResponse, InitialLoadResponse},
         graphql::{get_request_context, get_user_facing_error_message},
         ids::{ClientId, HashableId, ServerId, ServerIdAndType, SyncId, ToServerId},
-        server_api::{auth::AuthClient, ServerApi},
+        server_api::ServerApi,
         sync_queue::SerializedModel,
     },
     settings::Preference,
@@ -42,10 +38,9 @@ use crate::{
     workspaces::user_profiles::UserProfileWithUID,
 };
 use anyhow::{anyhow, Context, Result};
-use async_channel::Sender;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use cynic::{MutationBuilder, QueryBuilder, SubscriptionBuilder};
+use cynic::{MutationBuilder, QueryBuilder};
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::collections::HashMap;
@@ -150,9 +145,6 @@ use warp_graphql::{
             UpdatedCloudObjectsResult,
         },
     },
-    subscriptions::{
-        get_warp_drive_updates::GetWarpDriveUpdates, start_graphql_streaming_operation,
-    },
 };
 
 /// Identifies a guest to remove from an object.
@@ -237,12 +229,8 @@ pub trait ObjectClient: 'static + Send + Sync {
     async fn give_up_notebook_edit_access(&self, notebook_id: NotebookId)
         -> Result<ServerMetadata>;
 
-    /// Gets updates for all Warp Drive actions.
-    async fn get_warp_drive_updates(
-        &self,
-        message_sender: Sender<ObjectUpdateMessage>,
-        stream_ready_sender: Sender<()>,
-    ) -> Result<()>;
+    // OpenWarp(本地化,Phase 2d-4a-1):原 `get_warp_drive_updates` GraphQL Subscription
+    // 在 listener.rs 物理删除后无调用方,从 trait 中移除。
 
     async fn fetch_changed_objects(
         &self,
@@ -823,56 +811,8 @@ impl ObjectClient for ServerApi {
         }
     }
 
-    /// Starts a websocket connections against the corresponding GraphQL subscription.
-    /// Messages received over the socket are sent over the `message_sender`.
-    /// Once the websocket is live, a one-shot message is sent over `stream_ready_sender`
-    /// to indicate so. This is because this method only returns once the websocket is closed.
-    async fn get_warp_drive_updates(
-        &self,
-        message_sender: Sender<ObjectUpdateMessage>,
-        stream_ready_sender: Sender<()>,
-    ) -> Result<()> {
-        // The init payload is how we convey any metadata about
-        // the subscription to the server (i.e. in lieu of http headers).
-        // TODO (written by Suraj): we should consider consolidating the places we
-        // supply this common data. GQL subscriptions use a different
-        // implementation from our general server requests (which make
-        // use of [`crate::http`]).
-        let mut init_payload = HashMap::new();
-
-        // Add the bearer token to the init payload when using header-based auth.
-        // Session-cookie-authenticated clients rely on the websocket handshake cookies instead.
-        let auth_token = self.get_or_refresh_access_token().await?;
-        if let Some(token) = auth_token.as_bearer_token() {
-            let bearer_token = format!("Bearer {token}");
-            init_payload.insert(http_client::AUTHORIZATION.as_str(), bearer_token);
-        }
-
-        // Add the app version, if available.
-        if let Some(app_version) = ChannelState::app_version() {
-            init_payload.insert(
-                http_client::headers::CLIENT_RELEASE_VERSION_HEADER_KEY,
-                app_version.to_string(),
-            );
-        }
-
-        let subscription = GetWarpDriveUpdates::build(());
-
-        start_graphql_streaming_operation(
-            &ChannelState::ws_server_url(),
-            init_payload,
-            subscription,
-            |res| {
-                res.ok_or_else(|| {
-                    anyhow!("missing response data for message in get_warp_drive_updates")
-                })
-                .and_then(|data| data.warp_drive_updates.try_into())
-            },
-            message_sender,
-            stream_ready_sender,
-        )
-        .await
-    }
+    // OpenWarp(本地化,Phase 2d-4a-1):原 `get_warp_drive_updates` GraphQL Subscription 实现
+    // 与 `Listener` / `ObjectUpdateMessage` 一同物理删除。在本地化零云请求场景下代码路径不可达。
 
     async fn fetch_changed_objects(
         &self,

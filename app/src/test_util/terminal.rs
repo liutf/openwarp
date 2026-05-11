@@ -41,7 +41,7 @@ use crate::{
     network::NetworkStatus,
     search::files::model::FileSearchModel,
     server::{
-        cloud_objects::{listener::Listener, update_manager::UpdateManager},
+        cloud_objects::update_manager::UpdateManager,
         server_api::ServerApiProvider,
         sync_queue::SyncQueue,
     },
@@ -78,7 +78,6 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(TeamUpdateManager::mock);
     app.add_singleton_model(UpdateManager::mock);
     app.add_singleton_model(MCPGalleryManager::new);
-    app.add_singleton_model(Listener::mock);
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(|_ctx| SyncedInputState::mock());

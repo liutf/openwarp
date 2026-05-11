@@ -20,7 +20,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use async_channel::Sender;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use warp_graphql::object_permissions::AccessLevel;
@@ -42,10 +41,7 @@ use crate::{
     drive::{folders::FolderId, sharing::SharingAccessLevel},
     notebooks::NotebookId,
     server::{
-        cloud_objects::{
-            listener::ObjectUpdateMessage,
-            update_manager::{GetCloudObjectResponse, InitialLoadResponse},
-        },
+        cloud_objects::update_manager::{GetCloudObjectResponse, InitialLoadResponse},
         ids::{ServerId, ServerIdAndType, SyncId},
         server_api::object::{GuestIdentifier, ObjectClient},
         sync_queue::SerializedModel,
@@ -359,13 +355,8 @@ impl ObjectClient for FakeObjectClient {
         unimplemented!("FakeObjectClient::give_up_notebook_edit_access")
     }
 
-    async fn get_warp_drive_updates(
-        &self,
-        _message_sender: Sender<ObjectUpdateMessage>,
-        _stream_ready_sender: Sender<()>,
-    ) -> Result<()> {
-        unimplemented!("FakeObjectClient::get_warp_drive_updates")
-    }
+    // OpenWarp(本地化,Phase 2d-4a-1):原 `get_warp_drive_updates` Fake 实现 + Sender<ObjectUpdateMessage>
+    // 参数随 trait 上的同名方法一并物理删除。
 
     async fn fetch_single_cloud_object(&self, _id: ServerId) -> Result<GetCloudObjectResponse> {
         unimplemented!("FakeObjectClient::fetch_single_cloud_object")

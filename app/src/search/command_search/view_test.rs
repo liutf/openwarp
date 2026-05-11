@@ -4,7 +4,7 @@ use crate::{
     cloud_object::model::persistence::CloudModel,
     network::NetworkStatus,
     server::{
-        cloud_objects::{listener::Listener, update_manager::UpdateManager},
+        cloud_objects::update_manager::UpdateManager,
         server_api::ServerApiProvider,
         sync_queue::SyncQueue,
         telemetry::context_provider::AppTelemetryContextProvider,
@@ -34,7 +34,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(TeamUpdateManager::mock);
-    app.add_singleton_model(Listener::mock);
     app.add_singleton_model(UpdateManager::mock);
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(|_| ResizableData::default());

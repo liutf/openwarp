@@ -39,9 +39,8 @@ use crate::{
         ServerWorkflowEnum,
     },
     convert_to_server_experiment,
-    server::cloud_objects::listener::ObjectUpdateMessage,
 };
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use regex::Regex;
 use std::path::PathBuf;
 use warp_graphql::workspace::AddonCreditsSettings as GqlAddonCreditsSettings;
@@ -67,7 +66,6 @@ use warp_graphql::{
     queries::{
         get_conversation_usage as gql_usage, get_workspaces_metadata_for_user::User as GqlUser,
     },
-    subscriptions::get_warp_drive_updates::WarpDriveUpdate,
     user::{DiscoverableTeamData as GqlDiscoverableTeamData, PublicUserProfile},
     workspace::{
         AdminEnablementSetting as GqlAdminEnablementSetting, AiAutonomyValue as GqlAiAutonomyValue,
@@ -967,57 +965,9 @@ impl From<PublicUserProfile> for UserProfileWithUID {
     }
 }
 
-impl TryFrom<WarpDriveUpdate> for ObjectUpdateMessage {
-    type Error = anyhow::Error;
-
-    fn try_from(value: WarpDriveUpdate) -> Result<Self, Self::Error> {
-        match value {
-            WarpDriveUpdate::ObjectActionOccurred(message) => {
-                Ok(ObjectUpdateMessage::ObjectActionOccurred {
-                    history: message.history.try_into()?,
-                })
-            }
-            WarpDriveUpdate::ObjectContentUpdated(message) => {
-                let server_object = message.object.try_into()?;
-                let last_editor = message.last_editor.map(|e| e.into());
-                Ok(ObjectUpdateMessage::ObjectContentChanged {
-                    server_object: Box::new(server_object),
-                    last_editor,
-                })
-            }
-            WarpDriveUpdate::ObjectDeleted(message) => Ok(ObjectUpdateMessage::ObjectDeleted {
-                object_uid: ServerId::from_string_lossy(message.object_uid.inner()),
-            }),
-            WarpDriveUpdate::ObjectMetadataUpdated(message) => {
-                Ok(ObjectUpdateMessage::ObjectMetadataChanged {
-                    metadata: message.metadata.try_into()?,
-                })
-            }
-            WarpDriveUpdate::ObjectPermissionsUpdated(message) => {
-                Ok(ObjectUpdateMessage::ObjectPermissionsChangedV2 {
-                    object_uid: ServerId::from_string_lossy(message.object_uid.inner()),
-                    user_profiles: message
-                        .user_profiles
-                        .into_iter()
-                        .flatten()
-                        .map(Into::into)
-                        .collect(),
-                    permissions: message.permissions.try_into()?,
-                })
-            }
-            WarpDriveUpdate::TeamMembershipsChanged(_) => {
-                Ok(ObjectUpdateMessage::TeamMembershipsChanged)
-            }
-            WarpDriveUpdate::AmbientTaskUpdated(message) => {
-                Ok(ObjectUpdateMessage::AmbientTaskUpdated {
-                    task_id: message.task_id.inner().to_string(),
-                    timestamp: message.task_updated_ts.utc(),
-                })
-            }
-            WarpDriveUpdate::Unknown => bail!("Unexpected WarpDriveUpdate variant"),
-        }
-    }
-}
+// OpenWarp(本地化,Phase 2d-4a-1):原 `TryFrom<WarpDriveUpdate> for ObjectUpdateMessage` 是
+// GraphQL Drive Subscription 拼装到 RTC 消息的转换,随 Listener / ObjectUpdateMessage
+// 一起物理删除。其调用端在 `server_api/object.rs::get_warp_drive_updates`,同一删除。
 
 impl TryFrom<warp_graphql::folder::Folder> for ServerFolder {
     type Error = anyhow::Error;
