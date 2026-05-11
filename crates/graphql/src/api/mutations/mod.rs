@@ -1,30 +1,34 @@
 pub mod add_object_guests;
 pub mod bulk_create_objects;
-pub mod confirm_file_artifact_upload;
 pub mod create_anonymous_user;
-pub mod create_file_artifact_upload_target;
 pub mod create_folder;
 pub mod create_generic_string_object;
 pub mod create_managed_secret;
 pub mod create_notebook;
 pub mod create_workflow;
-pub mod delete_ai_conversation;
 pub mod delete_managed_secret;
 pub mod delete_object;
 pub mod empty_trash;
 pub mod expire_api_key;
 pub mod generate_api_key;
 pub mod generate_commands;
-pub mod generate_dialogue;
 pub mod generate_metadata_for_command;
 // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
 // `leave_object` / `record_object_action` / `remove_object_guest` 5 个 mutation
 // 唯一消费方 (ObjectClient impl) 已本地 stub 为 Err,文件一并物理删除。
+//
+// OpenWarp Wave 2-2:再删 5 个 AI mutation —
+// `confirm_file_artifact_upload` / `create_file_artifact_upload_target`
+// / `delete_ai_conversation` / `generate_dialogue` / `request_bonus`
+// (`provideNegativeFeedbackResponseForAiConversation`) — 唯一消费方
+// `AIClient impl for ServerApi` 已本地 stub Err。
+// `generate_commands` / `generate_metadata_for_command` 有复用类型被
+// `app/src/ai_assistant` / `app/src/drive/workflows/ai_assist.rs` import,
+// 保留 operation 文件;Wave 3 裁掉调用方后可进一步删除。
 pub mod issue_task_identity_token;
 pub mod mint_custom_token;
 pub mod move_object;
 pub mod remove_object_link_permissions;
-pub mod request_bonus;
 pub mod set_object_link_permissions;
 pub mod transfer_generic_string_object_owner;
 pub mod transfer_notebook_owner;
