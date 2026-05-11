@@ -3593,6 +3593,10 @@ impl UpdateManager {
     }
 
     /// Generic function for creating a new cloud object with a given model.
+    ///
+    /// OpenWarp(本地化):同 `update_object` — 原实现入队 `SyncQueue` 等服务端创建 ack,
+    /// 本地化后仅保留创建内存对象 + 写 sqlite。对象以 client_id 身份永久存在,
+    /// 不再提升为 server_id。`entrypoint` / `initiated_by` 参数保留接口稳定。
     #[allow(clippy::too_many_arguments)]
     pub fn create_object<K, M>(
         &mut self,
@@ -3616,6 +3620,11 @@ impl UpdateManager {
             + 'static,
         M: CloudModelType<IdType = K, CloudObjectType = GenericCloudObject<K, M>> + 'static,
     {
+        // OpenWarp:上云队列腿被砍,两个参数仅用于 `create_object_queue_item` 构造;
+        // 保留接口以避免冲击 30+ 调用点签名。
+        let _ = entrypoint;
+        let _ = initiated_by;
+
         let object_id = SyncId::ClientId(client_id);
         let auth_state = AuthStateProvider::as_ref(ctx).get();
         let initial_editor = auth_state.user_id();
@@ -3641,17 +3650,6 @@ impl UpdateManager {
         if let Some(object) = cloud_model.get_object_of_type::<K, M>(&object_id) {
             self.save_to_db([object.upsert_event()]);
         }
-
-        // Populate sync queue.
-        SyncQueue::handle(ctx).update(ctx, |sync_queue, ctx| {
-            let cloud_model = CloudModel::as_ref(ctx);
-            if let Some(object) = cloud_model.get_object_of_type::<K, M>(&object_id) {
-                if let Some(queue_item) = object.create_object_queue_item(entrypoint, initiated_by)
-                {
-                    sync_queue.enqueue(queue_item, ctx);
-                }
-            };
-        });
     }
 
     /// Create a new cloud object as an online-only operation.
