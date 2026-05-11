@@ -1,10 +1,6 @@
-use std::sync::Arc;
-
 use chrono::Duration;
 use warpui::{App, ModelHandle};
 
-use crate::server::server_api::team::MockTeamClient;
-use crate::server::server_api::workspace::MockWorkspaceClient;
 use crate::server::server_api::ServerApiProvider;
 use crate::workspaces::{
     user_workspaces::UserWorkspaces,
@@ -28,12 +24,7 @@ fn create_test_workspace() -> (WorkspaceUid, Workspace) {
 
 fn add_user_workspaces_with_workspace(app: &mut App, workspace: Workspace) {
     app.add_singleton_model(|ctx| {
-        UserWorkspaces::mock(
-            Arc::new(MockTeamClient::new()),
-            Arc::new(MockWorkspaceClient::new()),
-            vec![workspace],
-            ctx,
-        )
+        UserWorkspaces::mock(vec![workspace], ctx)
     });
 }
 

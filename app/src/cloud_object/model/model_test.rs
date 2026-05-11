@@ -57,10 +57,6 @@ use super::*;
 
 #[cfg(test)]
 use crate::server::server_api::object::MockObjectClient;
-#[cfg(test)]
-use crate::server::server_api::team::MockTeamClient;
-#[cfg(test)]
-use crate::server::server_api::workspace::MockWorkspaceClient;
 
 fn create_cloud_model(
     app: &mut App,
@@ -94,9 +90,6 @@ fn initialize_app(
     cached_objects: Vec<Box<dyn CloudObject>>,
     cloud_object_server_api_mock: Arc<impl ObjectClient>,
 ) {
-    let team_client_mock = Arc::new(MockTeamClient::new());
-    let workspace_client_mock = Arc::new(MockWorkspaceClient::new());
-
     // Add the necessary singleton models to the App
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| SystemStats::new());
@@ -105,12 +98,7 @@ fn initialize_app(
     app.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
     app.add_singleton_model(AuthManager::new_for_test);
     app.add_singleton_model(|ctx| {
-        UserWorkspaces::mock(
-            team_client_mock.clone(),
-            workspace_client_mock.clone(),
-            vec![TEST_WORKSPACE.clone()],
-            ctx,
-        )
+        UserWorkspaces::mock(vec![TEST_WORKSPACE.clone()], ctx)
     });
     app.add_singleton_model(TeamTesterStatus::new);
     app.add_singleton_model(SyncQueue::mock);

@@ -27,8 +27,6 @@ mod tests {
     use crate::NetworkStatus;
 
     use crate::server::server_api::object::MockObjectClient;
-    use crate::server::server_api::team::MockTeamClient;
-    use crate::server::server_api::workspace::MockWorkspaceClient;
 
     fn mock_server_notebook_with_revision(
         id: i64,
@@ -66,16 +64,7 @@ mod tests {
     fn initialize_app(app: &mut App) {
         app.add_singleton_model(|_| NetworkStatus::new());
         app.add_singleton_model(|_| SystemStats::new());
-        let mock_team_client = Arc::new(MockTeamClient::new());
-        let mock_workspace_client = Arc::new(MockWorkspaceClient::new());
-        app.add_singleton_model(|ctx| {
-            UserWorkspaces::mock(
-                mock_team_client.clone(),
-                mock_workspace_client.clone(),
-                vec![],
-                ctx,
-            )
-        });
+        app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![], ctx));
         app.add_singleton_model(TeamTesterStatus::new);
         app.add_singleton_model(SyncQueue::mock);
         app.add_singleton_model(CloudModel::mock);
