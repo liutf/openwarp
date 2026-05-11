@@ -601,7 +601,7 @@ impl ServerApi {
 
     /// Opens an SSE stream to the agent event-push endpoint.
     ///
-    /// OpenWarp Wave 5-3:本方法原走 RTC 云端 SSE 端点 (`rtc_http_url()/api/v1/agent/events/stream`)
+    /// OpenWarp Wave 5-3:本方法原走 RTC 云端 SSE 端点 (云端 RTC `/api/v1/agent/events/stream`)
     /// 用于接收 cloud agent run 的事件推送。OpenWarp 已剩离云端 RTC pool,该 URL
     /// 不可达 — 直接 stub 返回错误。两个消费方都 graceful 处理 Err:
     /// - `ai/agent_sdk/ambient.rs:949`: 重连 retry 退避到最大重试后上抓,initial 连接
