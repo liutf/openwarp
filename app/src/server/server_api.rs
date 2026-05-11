@@ -44,7 +44,6 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 use instant::Instant;
 use parking_lot::{Mutex, RwLock};
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt;
@@ -118,10 +117,7 @@ pub struct CloudAgentCapacityError {
     pub running_agents: i32,
 }
 
-#[derive(Deserialize, Debug)]
-struct TimeResponse {
-    current_time: DateTime<FixedOffset>,
-}
+// OpenWarp Wave 5-3:`TimeResponse` 随云端 `/current_time` GET 接口 stub 化后 0 消费,物理删。
 
 #[derive(Debug, Clone)]
 pub struct ServerTime {
@@ -722,36 +718,25 @@ impl ServerApi {
         &self.client
     }
 
+    /// 返回用于计算 autoupdate update-by 截止时间的「服务器时间」。
+    ///
+    /// OpenWarp Wave 5-3:原实现 GET `云端/current_time` 端点进行时钟同步,
+    /// OpenWarp 剩离云端 → 该端点不可达。唯一消费方 `root_view.rs::server_time_updated`
+    /// 是在 autoupdate ready + 有 `update_by` 时以服务器时间为准决定是否马上重启,
+    /// 不依赖时钟「权威」ⓓⓒⓓ。1987·仅为防本地时钟被用户手动拨后。OpenWarp
+    /// 环境下允许使用本地时钟 → 返回本地 [`Utc::now()`] 包装的 [`ServerTime`],
+    /// autoupdate 逻辑不变,且不再产生云端 HTTP 请求。
     pub async fn server_time(&self) -> Result<ServerTime> {
         if let Some(cached) = self.cached_server_time() {
             return Ok(cached);
         }
 
-        let time_endpoint = format!("{}/current_time", ChannelState::server_root_url());
-        log::info!("Sending server time request to {}", &time_endpoint);
-        let res = self.client.get(&time_endpoint).send().await?;
-
-        match res.status() {
-            StatusCode::OK => {
-                let time_response: TimeResponse = res.json().await?;
-                log::info!(
-                    "Received current time from server: {:?}",
-                    &time_response.current_time
-                );
-                let server_time = ServerTime {
-                    time_at_fetch: time_response.current_time,
-                    fetched_at: Instant::now(),
-                };
-                let res = Ok(server_time.clone());
-                self.set_server_time(server_time);
-
-                res
-            }
-            _ => {
-                let payload: ClientError = res.json().await?;
-                Err(anyhow!(payload).context("fetching time from server failed"))
-            }
-        }
+        let server_time = ServerTime {
+            time_at_fetch: chrono::Utc::now().into(),
+            fetched_at: Instant::now(),
+        };
+        self.set_server_time(server_time.clone());
+        Ok(server_time)
     }
 
     /// Fetches updated Warp Channel Versions from Warp Server. If it is the first such request of
