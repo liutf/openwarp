@@ -4806,13 +4806,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "firebase"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14869,7 +14862,6 @@ dependencies = [
  "env_logger",
  "event-listener",
  "field_mask",
- "firebase",
  "flate2",
  "float-cmp",
  "fluent",

@@ -812,17 +812,43 @@ pub enum AuthManagerEvent {
     CreateAnonymousUserFailed,
 }
 
+/// Google Identity Platform / Firebase Auth REST 错误 payload。
+///
+/// 历史上 `crates/firebase` 封装 `/v1/accounts/lookup` 与 `/v1/token` 的错误响应。
+/// OpenWarp Wave 5-1 把整 `firebase` crate 物理删,把唯一仍被消费的 `FirebaseError`
+/// 内联到 auth facade,作为 [`UserAuthenticationError::DeniedAccessToken`] /
+/// [`UserAuthenticationError::UserAccountDisabled`] 的 payload 占位 — 这两个
+/// variant 在 OpenWarp 路径下永不构造,仅保留 enum 形以避免 `root_view.rs` 等
+/// 消费点 match arm 全量改动。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirebaseError {
+    pub code: i32,
+    pub message: String,
+}
+
+impl std::error::Error for FirebaseError {}
+
+impl std::fmt::Display for FirebaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Firebase request failed with status {} and message: {}",
+            self.code, self.message
+        )
+    }
+}
+
 /// 用户认证错误 facade。`root_view.rs` / `server/sync_queue.rs` 等多处仍 match
 /// 各 variant,因此保留 enum;OpenWarp 不再触发任何 variant 的构造。
 ///
-/// `DeniedAccessToken` / `UserAccountDisabled` 携带 [`firebase::FirebaseError`]
-/// 以维持旧 mock 构造点 (`sync_queue_test`) 编译。
+/// `DeniedAccessToken` / `UserAccountDisabled` 携带本模块内联的 [`FirebaseError`]
+/// 以维持旧 mock 构造点编译。
 #[derive(Debug, thiserror::Error)]
 pub enum UserAuthenticationError {
     #[error("Access token denied: {0:?}")]
-    DeniedAccessToken(firebase::FirebaseError),
+    DeniedAccessToken(FirebaseError),
     #[error("User account disabled: {0:?}")]
-    UserAccountDisabled(firebase::FirebaseError),
+    UserAccountDisabled(FirebaseError),
     #[error("Invalid state parameter")]
     InvalidStateParameter,
     #[error("Missing state parameter")]
