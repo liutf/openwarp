@@ -1,4 +1,3 @@
-mod collector;
 mod context;
 pub mod context_provider;
 mod events;
@@ -7,7 +6,6 @@ pub mod rudder_message;
 pub mod secret_redaction;
 
 use chrono::Utc;
-pub use collector::*;
 pub use context::telemetry_context;
 pub use events::*;
 
