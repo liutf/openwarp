@@ -7,7 +7,6 @@ pub mod create_folder;
 pub mod create_generic_string_object;
 pub mod create_managed_secret;
 pub mod create_notebook;
-pub mod create_simple_integration;
 pub mod create_workflow;
 pub mod delete_ai_conversation;
 pub mod delete_managed_secret;

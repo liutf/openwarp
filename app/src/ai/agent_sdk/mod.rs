@@ -81,10 +81,6 @@ pub(crate) mod driver;
 mod environment;
 mod federate;
 mod harness_support;
-#[cfg(not(target_family = "wasm"))]
-mod integration;
-#[cfg(not(target_family = "wasm"))]
-mod integration_output;
 mod mcp;
 mod mcp_config;
 mod model;
@@ -153,11 +149,11 @@ fn dispatch_command(
             provider::run(ctx, global_options, provider_cmd)
         }
         #[cfg(not(target_family = "wasm"))]
-        CliCommand::Integration(integration_cmd) => {
-            if !FeatureFlag::IntegrationCommand.is_enabled() {
-                return Err(anyhow::anyhow!("invalid value 'integration'"));
-            }
-            integration::run(ctx, global_options, integration_cmd)
+        CliCommand::Integration(_integration_cmd) => {
+            // OpenWarp:云端 Simple Integration CRUD 已下线,CLI 子命令直接报错。
+            return Err(anyhow::anyhow!(
+                "Cloud integrations disabled in OpenWarp"
+            ));
         }
         #[cfg(target_family = "wasm")]
         CliCommand::Integration(_) => {
