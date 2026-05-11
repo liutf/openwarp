@@ -5,28 +5,21 @@ mod macros;
 pub mod rudder_message;
 pub mod secret_redaction;
 
-use chrono::Utc;
 pub use context::telemetry_context;
 pub use events::*;
 
 use crate::auth::UserUid;
-use crate::features::FeatureFlag;
-use crate::server::telemetry::context::AttachContext;
 use crate::server::telemetry_ext::TelemetryExt;
 use crate::settings::PrivacySettingsSnapshot;
 use crate::ChannelState;
 use anyhow::Result;
 use futures::FutureExt;
-use rudder_message::{
-    Batch as RudderBatch, BatchMessage as RudderBatchMessageWithMetadata,
-    BatchMessageItem as RudderBatchMessage, Message as RudderMessage,
-};
+use rudder_message::BatchMessageItem as RudderBatchMessage;
 use std::fs::File;
 #[cfg(not(target_family = "wasm"))]
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use warp_core::channel::RudderStackDestination;
 use warpui::telemetry::Event;
 
 /// Filename for file where telemetry events are written on app quit.
@@ -88,27 +81,11 @@ impl TelemetryApi {
 
     // Batches up telemetry events from the global queue and sends a Message to the Rudderstack API.
     // Returns the number of events that were flushed.
-    pub async fn flush_events(&self, settings_snapshot: PrivacySettingsSnapshot) -> Result<usize> {
+    pub async fn flush_events(&self, _settings_snapshot: PrivacySettingsSnapshot) -> Result<usize> {
+        // OpenWarp(P2):闭源遥测剥离 — 不再向 Rudderstack 发送任何事件。
+        // 仍消费一次队列以避免事件持续堆积占用内存。
         let events = warpui::telemetry::flush_events();
-        let event_count = events.len();
-
-        #[cfg(not(target_family = "wasm"))]
-        if FeatureFlag::SendTelemetryToFile.is_enabled() {
-            self.persist_events_to_telemetry_log_file(events.clone())?;
-        }
-
-        if ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled() {
-            self.send_batch_messages_to_rudder(
-                events
-                    .into_iter()
-                    .map(Event::to_rudder_batch_message)
-                    .collect(),
-                settings_snapshot,
-            )
-            .await?;
-        }
-
-        Ok(event_count)
+        Ok(events.len())
     }
 
     /// Flushes events directly to Rudder that were previously written into a file at `path`
@@ -116,23 +93,12 @@ impl TelemetryApi {
     pub async fn flush_persisted_events_to_rudder(
         &self,
         path: &Path,
-        settings_snapshot: PrivacySettingsSnapshot,
+        _settings_snapshot: PrivacySettingsSnapshot,
     ) -> Result<()> {
+        // OpenWarp(P2):闭源遥测剥离 — 历史 rudder 事件文件直接丢弃。
         if path.exists() {
-            let file = File::open(path)?;
-            let events: Vec<RudderBatchMessage> = serde_json::from_reader(file)?;
-            if !events.is_empty() {
-                let rudder_batch_messages = events
-                    .into_iter()
-                    .map(|message| RudderBatchMessageWithMetadata {
-                        message,
-                        // We don't persist any events that contain sensitive user data.
-                        contains_ugc: false,
-                    })
-                    .collect();
-                self.send_batch_messages_to_rudder(rudder_batch_messages, settings_snapshot)
-                    .await?;
-                log::info!("Successfully flushed events to rudder from disk");
+            if let Err(e) = std::fs::remove_file(path) {
+                log::warn!("Failed to remove stale rudder event file {path:?}: {e}");
             }
         }
         Ok(())
@@ -183,7 +149,7 @@ impl TelemetryApi {
         max_event_count: usize,
         events: Vec<Event>,
     ) -> Result<()> {
-        let rudder_events_to_persist: Vec<_> = events
+        let rudder_events_to_persist: Vec<RudderBatchMessage> = events
             .into_iter()
             .rev()
             .take(max_event_count)
@@ -228,19 +194,15 @@ impl TelemetryApi {
             .await
     }
 
-    /// Internal implementation for sending telemetry events. This reduces code size, since
-    // we:
-    // 1. Return a boxed future, so calling `async` functions don't need to inline this one.
-    // 2. Don't have to monomorphize for each telemetry event implementation.
+    /// Internal implementation for sending telemetry events.
+    /// OpenWarp(P2):闭源遥测剥离 — `record_event` 与本路径双 no-op,永不发包。
+    /// 历史 Rudder/Sandbox 守护与 send_batch_messages_to_rudder/send_rudder_request
+    /// 死代码已在 P2 物理清除。
     fn send_telemetry_event_internal(
         &self,
         _event: Event,
         _settings_snapshot: PrivacySettingsSnapshot,
     ) -> impl Future<Output = Result<()>> + '_ {
-        // openWarp 闭源遥测剥离 P1:与 `record_event` no-op 配套,这条"绕过 EventStore
-        // 直发 Rudder"的副链路(`send_telemetry_event` → `create_event` → 此处)同步切断。
-        // 原 release_bundle / FeatureFlag 守护仅是运行时短路,P1 在代码层把 work 永远 Ok。
-        // `send_batch_messages_to_rudder` / `persist_events_to_telemetry_log_file` 暂留死代码,P4 物理清理。
         let work = async move { Result::Ok(()) };
 
         // On WASM, the work future is non-Send, because the HTTP request future contains a reference to a JS
@@ -253,117 +215,6 @@ impl TelemetryApi {
                 work.boxed()
             }
         }
-    }
-
-    /// Send a batch of RudderStack messages to their HTTP API.
-    /// Note that the rudderanalytics SDK provides a client, but we don't
-    /// use it for a few reasons:
-    /// 1. It only supports a blocking HTTP client instead of an async one
-    /// 2. We want to use our own HTTP client which has before/after request logging hooks
-    #[cfg_attr(target_family = "wasm", allow(clippy::question_mark))]
-    async fn send_batch_messages_to_rudder(
-        &self,
-        messages: Vec<RudderBatchMessageWithMetadata>,
-        settings_snapshot: PrivacySettingsSnapshot,
-    ) -> Result<()> {
-        if messages.is_empty() {
-            log::debug!("Dropping empty RudderStack telemetry batch");
-            return Ok(());
-        }
-
-        if settings_snapshot.should_disable_telemetry() {
-            log::info!("Not sending batched messages because telemetry is disabled.");
-            return Ok(());
-        }
-
-        log::info!("Start to send telemetry events to RudderStack");
-
-        let (mut messages_with_ugc, messages_without_ugc): (Vec<_>, Vec<_>) = messages
-            .into_iter()
-            .partition(|message| message.contains_ugc);
-
-        // If we shouldn't collect UGC telemetry, forcibly clear any messages with UGC before trying to send.
-        if !settings_snapshot.should_collect_ai_ugc_telemetry() {
-            messages_with_ugc.clear();
-        }
-
-        for (messages, rudder_stack_destination) in [
-            (
-                messages_with_ugc,
-                ChannelState::rudderstack_ugc_destination(),
-            ),
-            (
-                messages_without_ugc,
-                ChannelState::rudderstack_non_ugc_destination(),
-            ),
-        ] {
-            if messages.is_empty() {
-                continue;
-            }
-
-            // Note that timestamp and context are already included in the individual RudderBatchMessages
-            // and these are the most important ones,
-            // but we also add them to the RudderMessage::Batch wrapper.
-            let rudder_message = RudderMessage::Batch(RudderBatch {
-                batch: messages
-                    .into_iter()
-                    .map(|message| message.message)
-                    .collect(),
-                original_timestamp: Some(Utc::now()),
-                ..Default::default()
-            });
-            if let Err(e) = self
-                .send_rudder_request(rudder_message, rudder_stack_destination)
-                .await
-            {
-                // Don't treat a connection issue as an error as these are outside of our control.
-                //
-                // This is only conditionally compiled because `is_connect` is not
-                // available on wasm.  If additional checks are made against the
-                // `reqwest::Error`, this condition should be performed specifically
-                // against `is_connect` and not the whole loop.
-                #[cfg(not(target_family = "wasm"))]
-                for cause in e.chain() {
-                    if let Some(err) = cause.downcast_ref::<reqwest::Error>() {
-                        if err.is_connect() {
-                            log::warn!("Failed to send event to RudderStack: {e}");
-                            return Ok(());
-                        }
-                    }
-                }
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    /// Sends a POST request to the RudderStack HTTP API.
-    async fn send_rudder_request(
-        &self,
-        mut msg: RudderMessage,
-        rudder_stack_destination: RudderStackDestination,
-    ) -> Result<()> {
-        msg.attach_context();
-
-        let path = match msg {
-            RudderMessage::Identify(_) => "/v1/identify",
-            RudderMessage::Track(_) => "/v1/track",
-            RudderMessage::Page(_) => "/v1/page",
-            RudderMessage::Screen(_) => "/v1/screen",
-            RudderMessage::Group(_) => "/v1/group",
-            RudderMessage::Alias(_) => "/v1/alias",
-            RudderMessage::Batch(_) => "/v1/batch",
-        };
-
-        self.client
-            .post(&format!("{}{}", rudder_stack_destination.root_url, path))
-            .basic_auth(rudder_stack_destination.write_key, Some(""))
-            .json(&msg)
-            .send()
-            .await?
-            .error_for_status()?;
-
-        Ok(())
     }
 }
 
