@@ -58,7 +58,5 @@ pub mod update_generic_string_object;
 pub mod update_managed_secret;
 pub mod update_notebook;
 pub mod update_object_guests;
-pub mod update_onboarding_survey_status;
-pub mod update_user_settings;
 pub mod update_workflow;
 pub mod update_workspace_settings;
