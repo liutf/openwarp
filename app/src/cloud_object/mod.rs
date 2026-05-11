@@ -33,7 +33,6 @@ use self::{
         persistence::CloudModel,
     },
 };
-use crate::server::cloud_objects::update_manager::InitiatedBy;
 use crate::{
     ai::cloud_agent_config::CloudAgentConfigModel,
     ai::cloud_environments::CloudAmbientAgentEnvironmentModel,
@@ -61,7 +60,6 @@ use crate::{
             ToServerId,
         },
         server_api::object::ObjectClient,
-        sync_queue::{QueueItem, SerializedModel},
     },
     settings::cloud_preferences::CloudPreferenceModel,
     util::time_format::format_approx_duration_from_now_utc,
@@ -99,6 +97,39 @@ pub mod model;
 pub mod toast_message;
 
 pub use warp_server_client::cloud_object::*;
+
+/// 包装一个 model 序列化后字符串的 newtype。
+///
+/// OpenWarp(Wave 4):原定义在 `crate::server::sync_queue`,SyncQueue 整删后
+/// 迁到这里。多个 model 的 `serialized()` 仍然返回它(本地写 sqlite 时使用)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SerializedModel(String);
+
+impl SerializedModel {
+    pub fn new(s: String) -> Self {
+        Self(s)
+    }
+
+    pub fn model_as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn take(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for SerializedModel {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for SerializedModel {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
 
 /// A CloudObject represents
 /// therefore shareable and editable (i.e. Notebooks and Workflows). In order
@@ -192,21 +223,6 @@ pub trait CloudObject: Debug {
     /// Returns an optional UpdatedObjectInput to use during initial load, where
     /// the object's timestamps are sent to the server for comparison
     fn versions(&self, app: &AppContext) -> Option<UpdatedObjectInput>;
-
-    /// Returns an optional sync queue item of this object that would allow it to
-    /// created properly on the server. Returns None if it's already been created
-    /// server-side.
-    fn create_object_queue_item(
-        &self,
-        entrypoint: CloudObjectEventEntrypoint,
-        initiated_by: InitiatedBy,
-    ) -> Option<QueueItem>;
-
-    /// Returns a sync queue item of this object that would allow it to be updated
-    /// properly on the server.  Takes an optional revision_ts to set as the revision
-    /// in the sync queue item. Returns None for object types that do not participate
-    /// in sync queue updates.
-    fn update_object_queue_item(&self, revision_ts: Option<Revision>) -> Option<QueueItem>;
 
     /// Returns whether this model type should render as a warp drive item.
     fn renders_in_warp_drive(&self) -> bool;
@@ -526,23 +542,6 @@ pub trait CloudModelType: Debug + Clone + Send + Sync {
     /// Returns a bulk upsert event for putting a list of this model into the SQLite database.
     fn bulk_upsert_event(objects: &[Self::CloudObjectType]) -> ModelEvent;
 
-    /// Returns the sync queue item for creating this model on the server.
-    fn create_object_queue_item(
-        &self,
-        object: &Self::CloudObjectType,
-        entrypoint: CloudObjectEventEntrypoint,
-        initiated_by: InitiatedBy,
-    ) -> Option<QueueItem>;
-
-    /// Returns the sync queue item for updating this model on the server.
-    /// Takes an optional revision timestamp to set in the queue item.
-    /// Returns None for model types that do not participate in sync queue updates.
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &Self::CloudObjectType,
-    ) -> Option<QueueItem>;
-
     /// Returns a serialized model.
     fn serialized(&self) -> SerializedModel;
 
@@ -803,19 +802,6 @@ where
             }
             _ => None,
         }
-    }
-
-    fn create_object_queue_item(
-        &self,
-        entrypoint: CloudObjectEventEntrypoint,
-        initiated_by: InitiatedBy,
-    ) -> Option<QueueItem> {
-        self.model
-            .create_object_queue_item(self, entrypoint, initiated_by)
-    }
-
-    fn update_object_queue_item(&self, revision_ts: Option<Revision>) -> Option<QueueItem> {
-        self.model.update_object_queue_item(revision_ts, self)
     }
 
     fn renders_in_warp_drive(&self) -> bool {

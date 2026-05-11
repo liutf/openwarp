@@ -9,9 +9,9 @@ use crate::{
             persistence::CloudModel,
         },
         GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject,
+        JsonObjectType, ServerCloudObject,
     },
-    server::{ids::SyncId, server_api::ai::AgentConfigSnapshot, sync_queue::QueueItem},
+    server::{ids::SyncId, server_api::ai::AgentConfigSnapshot},
 };
 use warpui::{AppContext, SingletonEntity as _};
 
@@ -88,18 +88,6 @@ impl StringModel for AgentConfig {
 
     fn display_name(&self) -> String {
         self.name.clone()
-    }
-
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &CloudAgentConfig,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateCloudAgentConfig {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
     }
 
     fn uniqueness_key(&self) -> Option<GenericStringObjectUniqueKey> {

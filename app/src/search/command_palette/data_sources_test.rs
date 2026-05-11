@@ -24,7 +24,6 @@ use crate::{
     search::data_source::Query,
     server::{
         cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-        sync_queue::SyncQueue,
     },
     system::SystemStats,
     workflows::WorkflowId,
@@ -88,7 +87,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| SystemStats::new());
     app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![], ctx));
     app.add_singleton_model(TeamTesterStatus::new);
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(CloudModel::mock);
     app.add_singleton_model(|ctx| UpdateManager::new(None, Arc::new(MockObjectClient::new()), ctx));
     app.add_singleton_model(|_| UserProfiles::new(Vec::new()));

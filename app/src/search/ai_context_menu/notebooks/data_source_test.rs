@@ -18,7 +18,6 @@ mod tests {
     use crate::server::cloud_objects::update_manager::UpdateManager;
     use crate::server::ids::{ServerId, SyncId};
     use crate::server::server_api::ServerApiProvider;
-    use crate::server::sync_queue::SyncQueue;
     use crate::settings::AISettings;
     use crate::system::SystemStats;
     use crate::workspaces::team_tester::TeamTesterStatus;
@@ -66,7 +65,6 @@ mod tests {
         app.add_singleton_model(|_| SystemStats::new());
         app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![], ctx));
         app.add_singleton_model(TeamTesterStatus::new);
-        app.add_singleton_model(SyncQueue::mock);
         app.add_singleton_model(CloudModel::mock);
         app.add_singleton_model(|ctx| {
             UpdateManager::new(None, Arc::new(MockObjectClient::new()), ctx)

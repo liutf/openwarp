@@ -18,7 +18,6 @@ use crate::{
     notebooks::{editor::keys::NotebookKeybindings, notebook::NotebookView},
     server::{
         cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-        sync_queue::SyncQueue,
     },
     settings_view::keybindings::KeybindingChangedNotifier,
     test_util::settings::initialize_settings_for_tests,
@@ -39,7 +38,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| Appearance::mock());
 
     app.add_singleton_model(UserWorkspaces::default_mock);
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
     app.add_singleton_model(CloudViewModel::mock);

@@ -19,7 +19,7 @@ use crate::{
     search::files::model::FileSearchModel,
     server::{
         cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-        sync_queue::SyncQueue, telemetry::context_provider::AppTelemetryContextProvider,
+        telemetry::context_provider::AppTelemetryContextProvider,
     },
     settings::PrivacySettings,
     settings_view::keybindings::KeybindingChangedNotifier,
@@ -103,10 +103,8 @@ fn initialize_app(app: &mut App) -> TestState {
 
     let (sender, receiver) = mpsc::sync_channel(10);
     let objects_client = ServerApiProvider::new_for_test().get_cloud_objects_client();
-    let sync_queue = app
-        .add_singleton_model(|ctx| SyncQueue::new(Default::default(), objects_client.clone(), ctx));
     app.add_singleton_model(|ctx| UpdateManager::new(Some(sender), objects_client.clone(), ctx));
-    sync_queue.update(app, |queue, ctx| queue.start_dequeueing(ctx));
+    // OpenWarp(Wave 4):SyncQueue 整删,原 `sync_queue.start_dequeueing(ctx)` 已不适用。
 
     app.add_singleton_model(CloudViewModel::mock);
     let manager = app.add_singleton_model(NotebookManager::mock);

@@ -15,7 +15,7 @@ use crate::{
     settings_view::keybindings::KeybindingChangedNotifier,
     terminal::shared_session::permissions_manager::SessionPermissionsManager,
     test_util::settings::initialize_settings_for_tests,
-    NetworkStatus, SyncQueue, TeamTesterStatus, UpdateManager, UserProfiles, UserWorkspaces,
+    NetworkStatus, TeamTesterStatus, UpdateManager, UserProfiles, UserWorkspaces
 };
 
 use super::{Event, OpenOverlay};
@@ -108,7 +108,6 @@ fn initialize_app(app: &mut App) {
 
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(|_| NetworkStatus::new());
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![], ctx));
     app.add_singleton_model(TeamTesterStatus::new);
     app.add_singleton_model(|_| ServerApiProvider::new_for_test());

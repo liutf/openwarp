@@ -213,7 +213,6 @@ use crate::persistence::PersistenceWriter;
 use crate::projects::ProjectManagementModel;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::experiments::ServerExperiments;
-use crate::server::sync_queue::{QueueItem, SyncQueue};
 use crate::session_management::{RunningSessionSummary, SessionNavigationData};
 use crate::settings::manager::SettingsManager;
 use crate::settings::{AccessibilitySettings, ScrollSettings, SelectionSettings};
@@ -260,7 +259,6 @@ use warpui::{integration::TestDriver, App, AssetProvider, Event};
 
 use self::features::FeatureFlag;
 use crate::app_state::AppState;
-use crate::cloud_object::model::actions::ObjectAction;
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::drive::CloudObjectTypeAndId;
 use crate::experiments::ImprovedPaletteSearch;
@@ -1614,16 +1612,6 @@ fn initialize_app(
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut all_queue_items = Vec::new();
-    let objects_with_pending_changes = cloud_objects
-        .iter()
-        .filter(|object| object.metadata().has_pending_content_changes())
-        .cloned()
-        .collect::<Vec<_>>();
-    all_queue_items.extend(QueueItem::from_cached_objects(
-        objects_with_pending_changes.into_iter(),
-    ));
-
     let cloud_model = ctx.add_singleton_model(|_ctx| {
         CloudModel::new(
             persistence_writer.sender(),
@@ -1632,28 +1620,11 @@ fn initialize_app(
         )
     });
 
-    let unsynced_actions: Vec<(CloudObjectTypeAndId, ObjectAction)> = object_actions
-        .iter()
-        .filter(|action| action.is_pending())
-        .filter_map(|action| {
-            cloud_model.read(ctx, |model, _| {
-                let object = model.get_by_uid(&action.uid);
-                object.map(|o| (o.cloud_object_type_and_id(), action.clone()))
-            })
-        })
-        .collect::<Vec<_>>();
-
-    all_queue_items.extend(QueueItem::from_unsynced_actions(
-        unsynced_actions.into_iter(),
-    ));
-
-    ctx.add_singleton_model(|ctx| {
-        SyncQueue::new(
-            all_queue_items,
-            server_api_provider.as_ref(ctx).get_cloud_objects_client(),
-            ctx,
-        )
-    });
+    // OpenWarp(Wave 4):SyncQueue 整删后,不再有 `unsynced_actions` /
+    // `objects_with_pending_changes` 跟踪;本地写入即“完成”。
+    let _ = (&cloud_model, &object_actions);
+    // 保留 `CloudObjectTypeAndId` import 供同 crate 其他模块按 `crate::` 路径访问。
+    let _: Option<CloudObjectTypeAndId> = None;
 
     timer.mark_interval_end("CLOUD_MODEL_INITIALIZED");
 

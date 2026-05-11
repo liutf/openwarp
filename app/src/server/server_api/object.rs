@@ -48,10 +48,10 @@ use crate::{
         cloud_objects::update_manager::{GetCloudObjectResponse, InitialLoadResponse},
         ids::{HashableId, ServerId, ServerIdAndType, SyncId},
         server_api::ServerApi,
-        sync_queue::SerializedModel,
     },
     workflows::WorkflowId,
 };
+use crate::cloud_object::SerializedModel;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
