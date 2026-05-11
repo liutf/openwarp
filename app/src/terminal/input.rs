@@ -254,8 +254,8 @@ use warp_completer::{
     parsers::{simple::command_at_cursor_position, LiteCommand},
     signatures::CommandRegistry,
 };
-use warp_core::user_preferences::GetUserPreferences as _;
 use warp_core::ui::theme::{color::internal_colors, AnsiColorIdentifier};
+use warp_core::user_preferences::GetUserPreferences as _;
 use warp_editor::editor::NavigationKey;
 use warp_util::path::ShellFamily;
 use warpui::{

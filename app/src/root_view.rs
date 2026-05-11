@@ -116,7 +116,18 @@ use warpui::{FocusContext, NextNewWindowsHasThisWindowsBoundsUponClose};
 #[cfg(target_family = "wasm")]
 use crate::auth::web_handoff::{WebHandoffEvent, WebHandoffView};
 
-const WINDOW_TITLE: &str = "Warp";
+/// 返回当前 channel 的产品名,作为窗口标题初始值与 quake/transferred 窗口标题。
+///
+/// 取 `ChannelState::app_id().application_name()` 是为了让 OSS 构建显示 `OpenWarp`、
+/// 而 Stable/Preview/Dev 等上游 channel 仍显示各自的 `Warp` / `WarpPreview` / `WarpDev`,
+/// 避免在 fork 中跨多处硬编码字符串(Windows 任务管理器按窗口标题做进程分组,
+/// 硬编码 `"Warp"` 会让 OpenWarp 在任务管理器里显示成 `Warp(N)`)。
+///
+/// 注意:窗口创建后,`Workspace::update_window_title()` 会在每次 tab 切换/重命名时
+/// 用 tab 标题覆盖此值,所以此函数仅决定窗口刚打开、还未挂上 tab 时的初始标题。
+fn window_title() -> String {
+    ChannelState::app_id().application_name().to_owned()
+}
 
 lazy_static! {
     static ref FALLBACK_WINDOW_SIZE: Vector2F = vec2f(800.0, 600.0);
@@ -613,7 +624,7 @@ pub fn create_transferred_window(
         AddWindowOptions {
             window_style,
             window_bounds,
-            title: Some(WINDOW_TITLE.to_owned()),
+            title: Some(window_title()),
             background_blur_radius_pixels: Some(*window_settings.background_blur_radius),
             background_blur_texture: *window_settings.background_blur_texture,
             on_gpu_driver_selected: on_gpu_driver_selected_callback(),
@@ -707,7 +718,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                         AddWindowOptions {
                             window_style: WindowStyle::Pin,
                             window_bounds: WindowBounds::ExactPosition(frame_args.window_bounds),
-                            title: Some("Warp".to_owned()),
+                            title: Some(window_title()),
                             fullscreen_state: window.fullscreen_state,
                             background_blur_radius_pixels,
                             background_blur_texture,
@@ -750,7 +761,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                         ctx.add_window(
                             AddWindowOptions {
                                 window_bounds: WindowBounds::new(window.bounds),
-                                title: Some("Warp".to_owned()),
+                                title: Some(window_title()),
                                 fullscreen_state: window.fullscreen_state,
                                 background_blur_radius_pixels,
                                 background_blur_texture,
@@ -802,7 +813,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                 ctx.add_window(
                     AddWindowOptions {
                         window_bounds: WindowBounds::new(window.bounds),
-                        title: Some("Warp".to_owned()),
+                        title: Some(window_title()),
                         fullscreen_state: window.fullscreen_state,
                         background_blur_radius_pixels,
                         background_blur_texture,
@@ -1175,7 +1186,7 @@ fn default_window_options(window_settings: &WindowSettings, ctx: &AppContext) ->
     AddWindowOptions {
         window_style,
         window_bounds: next_bounds,
-        title: Some("Warp".to_owned()),
+        title: Some(window_title()),
         background_blur_radius_pixels: Some(*window_settings.background_blur_radius),
         background_blur_texture: *window_settings.background_blur_texture,
         on_gpu_driver_selected: on_gpu_driver_selected_callback(),
@@ -1360,7 +1371,7 @@ fn toggle_quake_mode_window(global_resource_handles: &GlobalResourceHandles, ctx
                 AddWindowOptions {
                     window_style: WindowStyle::Pin,
                     window_bounds: WindowBounds::ExactPosition(config.window_bounds),
-                    title: Some("Warp".to_owned()),
+                    title: Some(window_title()),
                     background_blur_radius_pixels: Some(*window_settings.background_blur_radius),
                     background_blur_texture: *window_settings.background_blur_texture,
                     // Ignore the quake window for positioning the next window

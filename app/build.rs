@@ -482,7 +482,13 @@ fn embed_resource_file(target_dir: &Path) {
     use std::io::Write;
 
     let version = env::var("GIT_RELEASE_TAG").unwrap_or("v0".to_owned());
-    let app_name = env::var("WARP_APP_NAME").unwrap_or("Warp".to_owned());
+    // 默认值与 publisher 一致定为「OpenWarp」,与 `script/windows/bundle.ps1` OSS 分支
+    // (`$APP_NAME = 'OpenWarp'`) + AUMID `dev.openwarp.OpenWarp` + Cargo bundle
+    // metadata 全局对齐。Windows 任务管理器的进程分组名实际取自 PE 资源中的
+    // `FileDescription` / `ProductName`(不是窗口标题),所以这里若回退默认 "Warp",
+    // 直接 `cargo build` 出来的 dev 二进制在任务管理器里会显示成 `Warp(N)`。
+    // 上游官方流水线在调用前会显式 `export WARP_APP_NAME=...` 覆盖,不受影响。
+    let app_name = env::var("WARP_APP_NAME").unwrap_or_else(|_| "OpenWarp".to_owned());
     let bin_name = env::var("CARGO_BIN_NAME").unwrap_or("local".to_owned());
     // 以 `WARP_APP_PUBLISHER` 覆盖;默认与 installer / AUMID 一致为「OpenWarp」。
     // 保持 installer `MyAppPublisher`、Cargo bundle metadata `copyright`、

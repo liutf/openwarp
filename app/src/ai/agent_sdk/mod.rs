@@ -151,9 +151,7 @@ fn dispatch_command(
         #[cfg(not(target_family = "wasm"))]
         CliCommand::Integration(_integration_cmd) => {
             // OpenWarp:云端 Simple Integration CRUD 已下线,CLI 子命令直接报错。
-            return Err(anyhow::anyhow!(
-                "Cloud integrations disabled in OpenWarp"
-            ));
+            return Err(anyhow::anyhow!("Cloud integrations disabled in OpenWarp"));
         }
         #[cfg(target_family = "wasm")]
         CliCommand::Integration(_) => {

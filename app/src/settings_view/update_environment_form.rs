@@ -1210,9 +1210,8 @@ impl UpdateEnvironmentForm {
         self.github_dropdown_state.app_install_link = None;
         self.github_dropdown_state.auth_url = None;
         self.github_dropdown_state.auth_fetched_at = None;
-        self.github_dropdown_state.load_error_message = Some(
-            "GitHub integration is disabled in OpenWarp.".to_string(),
-        );
+        self.github_dropdown_state.load_error_message =
+            Some("GitHub integration is disabled in OpenWarp.".to_string());
         self.update_repos_input_placeholder(ctx);
         ctx.notify();
     }
