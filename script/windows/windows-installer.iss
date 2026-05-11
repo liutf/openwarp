@@ -2,8 +2,8 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 #include "environment.iss"
 
-#define MyAppPublisher "Denver Technologies, Inc."
-#define MyAppURL "https://www.warp.dev/"
+#define MyAppPublisher "OpenWarp"
+#define MyAppURL "https://openwarp.zerx.dev/"
 #ifndef MyAppName
   #define MyAppName "WarpDev"
 #endif

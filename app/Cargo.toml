@@ -927,7 +927,7 @@ configurable_context_window = []
 
 [package.metadata.bundle.bin.warp-oss]
 category = "public.app-category.developer-tools"
-copyright = "© 2025, Denver Technologies, Inc"
+copyright = "© 2025-2026, OpenWarp"
 identifier = "dev.openwarp.OpenWarp"
 name = "OpenWarp"
 resources = ["assets/onboarding"]
