@@ -138,7 +138,6 @@ use crate::uri::web_intent_parser::maybe_rewrite_web_url_to_intent;
 use ::ai::project_context::model::ProjectContextModel;
 pub use ai::agent::{todos::AIAgentTodoList, AIAgentActionResultType, FileEdit, TodoOperation};
 use ai::agent_conversations_model::AgentConversationsModel;
-use ai::ambient_agents::scheduled::ScheduledAgentManager;
 use ai::blocklist::{BlocklistAIHistoryModel, BlocklistAIPermissions};
 use ai::execution_profiles::editor::ExecutionProfileEditorManager;
 use ai::execution_profiles::profiles::AIExecutionProfilesModel;
@@ -1827,9 +1826,8 @@ fn initialize_app(
     ctx.add_singleton_model(EnvVarCollectionManager::new);
     ctx.add_singleton_model(WorkflowManager::new);
 
-    if FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-        ctx.add_singleton_model(ScheduledAgentManager::new);
-    }
+    // OpenWarp(本地化,Phase 5):`ScheduledAgentManager` 需要云端 ambient agent 调度,
+    // FeatureFlag::ScheduledAmbientAgents 在 Phase 3b-1 已下柜,singleton 永不注入。
 
     AutoupdateState::register(ctx, server_api.clone());
 
