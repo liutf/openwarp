@@ -65,9 +65,6 @@ use warp_graphql::{
             ConfirmFileArtifactUpload, ConfirmFileArtifactUploadInput,
             ConfirmFileArtifactUploadResult, ConfirmFileArtifactUploadVariables,
         },
-        create_agent_task::{
-            CreateAgentTask, CreateAgentTaskInput, CreateAgentTaskResult, CreateAgentTaskVariables,
-        },
         create_file_artifact_upload_target::{
             CreateFileArtifactUploadTarget, CreateFileArtifactUploadTargetInput,
             CreateFileArtifactUploadTargetResult, CreateFileArtifactUploadTargetVariables,
@@ -94,10 +91,6 @@ use warp_graphql::{
             ProvideNegativeFeedbackResponseForAiConversation,
             ProvideNegativeFeedbackResponseForAiConversationInput,
             ProvideNegativeFeedbackResponseForAiConversationVariables, RequestsRefundedResult,
-        },
-        update_agent_task::{
-            AgentTaskStatusMessageInput, UpdateAgentTask, UpdateAgentTaskInput,
-            UpdateAgentTaskResult, UpdateAgentTaskVariables,
         },
     },
     queries::{
@@ -1220,36 +1213,12 @@ impl AIClient for ServerApi {
         parent_run_id: Option<String>,
         config: Option<AgentConfigSnapshot>,
     ) -> anyhow::Result<AmbientAgentTaskId, anyhow::Error> {
-        // Serialize the config to JSON if provided
-        let agent_config_snapshot = config
-            .map(|c| serde_json::to_string(&c))
-            .transpose()
-            .map_err(|e| anyhow!("Failed to serialize agent config: {e}"))?;
-
-        let variables = CreateAgentTaskVariables {
-            input: CreateAgentTaskInput {
-                prompt,
-                environment_uid: environment_uid.map(|uid| uid.into()),
-                parent_run_id: parent_run_id.map(|run_id| run_id.into()),
-                agent_config_snapshot,
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = CreateAgentTask::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.create_agent_task {
-            CreateAgentTaskResult::CreateAgentTaskOutput(output) => output
-                .task_id
-                .into_inner()
-                .parse()
-                .map_err(|e| anyhow!("Failed to parse task ID from server: {e}")),
-            CreateAgentTaskResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            CreateAgentTaskResult::Unknown => Err(anyhow!("failed to create agent task")),
-        }
+        // OpenWarp(本地化,Phase 3b 主体):原实现走 GraphQL `create_agent_task` mutation
+        // 在云端创建 ambient agent task。本地化场景下无云端调度,直接本地生成 UUID v4。
+        // 此入口实际上已被 `agent_sdk/mod.rs::initialize_new_task` no-op 化(Phase 3b-2),
+        // 此处仅作为 trait 兼容残留,保留同步签名返回本地 task id。
+        let _ = (prompt, environment_uid, parent_run_id, config);
+        Ok(AmbientAgentTaskId::new_local())
     }
 
     async fn update_agent_task(
@@ -1260,31 +1229,13 @@ impl AIClient for ServerApi {
         conversation_id: Option<String>,
         status_message: Option<TaskStatusUpdate>,
     ) -> anyhow::Result<(), anyhow::Error> {
-        let variables = UpdateAgentTaskVariables {
-            input: UpdateAgentTaskInput {
-                task_id: task_id.into(),
-                task_state,
-                session_id: session_id.map(|id| id.to_string().into()),
-                conversation_id: conversation_id.map(|id| id.into()),
-                status_message: status_message.map(|update| AgentTaskStatusMessageInput {
-                    message: update.message,
-                    error_code: update.error_code,
-                }),
-            },
-            request_context: get_request_context(),
-        };
-
-        let operation = UpdateAgentTask::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.update_agent_task {
-            UpdateAgentTaskResult::UpdateAgentTaskOutput(_) => Ok(()),
-            UpdateAgentTaskResult::UserFacingError(e) => {
-                Err(anyhow!(get_user_facing_error_message(e)))
-            }
-            UpdateAgentTaskResult::Unknown => Err(anyhow!("failed to update agent task")),
-        }
+        // OpenWarp(本地化,Phase 3b 主体):原实现走 GraphQL `update_agent_task` mutation。
+        // 本地化无云端 task 概念,直接 no-op。`driver.rs` 内 4 处调用点(state 更新 /
+        // conversation_id 关联 / session_id 关联 / 错误上报)在本地无任何后续消费者。
+        let _ = (task_id, task_state, session_id, conversation_id, status_message);
+        Ok(())
     }
+
 
     async fn spawn_agent(
         &self,
