@@ -1,3 +1,28 @@
+//! # OpenWarp 本地化说明(Phase 2d-4b,2026-05-11 修订)
+//!
+//! 本模块在上游 Warp 中承担 "云对象" 抽象,统一描述 Notebook / Workflow / EnvVar /
+//! Fact / MCP / ExecutionProfile / AIDocument 等需要在多设备间同步的对象类型。
+//!
+//! 在 OpenWarp 中云端同步链路(RTC / UpdateManager / SyncQueue / ServerApiProvider)
+//! 已被剥离(详见 `docs/openwarp-cloud-removal-plan.md`),本模块**变为纯本地对象抽象**:
+//!
+//! - `CloudObject` trait → 实际语义是 "本地领域对象 trait",承载 metadata / permissions /
+//!   versions / display_name / upsert_event / as_any / clone_box;命名上的 `Cloud` 前缀
+//!   仅为减少跨上游 cherry-pick 的 diff 面而保留,不再具有任何云端含义。
+//! - `GenericCloudObject<K, M>` → 本地领域对象的泛型承载结构。
+//! - `CloudModelType` trait → 本地对象类型描述。
+//! - `CloudModel`(`model/persistence.rs`)→ 进程内本地对象全局存储 + SQLite 背存。
+//! - `CloudModelEvent` → 本地模型变更事件总线,被本地 UI 视图订阅。
+//! - `CloudObjectTypeAndId` → 本地 ID 判别式,被 Drive UI / search 等 60+ 处使用。
+//!
+//! 之所以采用 "保留原名 + 文档注释" 而非物理重命名(`CloudObject` → `LocalObject`),
+//! 是为了把重命名的 200+ 处级联改动留到上游同步策略稳定后再统一做,本阶段**只
+//! 标注语义已本地化**,不动符号名。
+//!
+//! 真正的 "服务端往返" 类型(`ServerCloudObject` enum / `ServerNotebook` /
+//! `ServerFolder` / `try_from_graphql_fields` / `CreateObjectRequest` 等)将在 Phase 5
+//! 与 `app/src/server/cloud_objects/` 一起物理删除,见同文档 Phase 2d-4a-2。
+
 use self::{
     breadcrumbs::ContainingObject,
     model::{
