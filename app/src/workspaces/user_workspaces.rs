@@ -811,17 +811,10 @@ impl UserWorkspaces {
         user_uid: UserUid,
         team_uid: ServerId,
         entrypoint: CloudObjectEventEntrypoint,
-        ctx: &mut ModelContext<Self>,
+        _ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                team_client
-                    .remove_user_from_team(user_uid, team_uid, entrypoint)
-                    .await
-            },
-            Self::on_workspaces_updated,
-        );
+        // OpenWarp(本地化,Phase 5):原发 GraphQL `RemoveUserFromTeam`,本地无 team 概念 → no-op。
+        let _ = (user_uid, team_uid, entrypoint);
     }
 
     fn on_add_invite_link_domain_restrictions(
@@ -845,17 +838,10 @@ impl UserWorkspaces {
         domains: Vec<String>,
         ctx: &mut ModelContext<Self>,
     ) {
-        for domain in domains {
-            let team_client = self.team_client.clone();
-            let _ = ctx.spawn(
-                async move {
-                    team_client
-                        .add_invite_link_domain_restriction(team_uid, domain)
-                        .await
-                },
-                Self::on_add_invite_link_domain_restrictions,
-            );
-        }
+        // OpenWarp(本地化,Phase 5):原发 GraphQL `AddInviteLinkDomainRestriction`,本地无 team/invite 概念 → 发 Success 事件使 UI 不卡住。
+        let _ = (team_uid, domains);
+        ctx.emit(UserWorkspacesEvent::AddDomainRestrictionsSuccess);
+        ctx.notify();
     }
 
     fn on_delete_invite_link_domain_restriction(
@@ -879,15 +865,9 @@ impl UserWorkspaces {
         domain_uid: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                team_client
-                    .delete_invite_link_domain_restriction(team_uid, domain_uid)
-                    .await
-            },
-            Self::on_delete_invite_link_domain_restriction,
-        );
+        let _ = (team_uid, domain_uid);
+        ctx.emit(UserWorkspacesEvent::DeleteDomainRestrictionSuccess);
+        ctx.notify();
     }
 
     fn on_email_invite_sent(
@@ -911,13 +891,9 @@ impl UserWorkspaces {
         emails: Vec<String>,
         ctx: &mut ModelContext<Self>,
     ) {
-        for email in emails {
-            let team_client = self.team_client.clone();
-            let _ = ctx.spawn(
-                async move { team_client.send_team_invite_email(team_uid, email).await },
-                Self::on_email_invite_sent,
-            );
-        }
+        let _ = (team_uid, emails);
+        ctx.emit(UserWorkspacesEvent::EmailInviteSent);
+        ctx.notify();
     }
 
     pub fn on_is_invite_link_enabled_set(
@@ -941,15 +917,9 @@ impl UserWorkspaces {
         new_value: bool,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                team_client
-                    .set_is_invite_link_enabled(team_uid, new_value)
-                    .await
-            },
-            Self::on_is_invite_link_enabled_set,
-        );
+        let _ = (team_uid, new_value);
+        ctx.emit(UserWorkspacesEvent::ToggleInviteLinksSuccess);
+        ctx.notify();
     }
 
     pub fn on_invite_links_reset(
@@ -968,11 +938,9 @@ impl UserWorkspaces {
     }
 
     pub fn reset_invite_links(&mut self, team_uid: ServerId, ctx: &mut ModelContext<Self>) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move { team_client.reset_invite_links(team_uid).await },
-            Self::on_invite_links_reset,
-        );
+        let _ = team_uid;
+        ctx.emit(UserWorkspacesEvent::ResetInviteLinks);
+        ctx.notify();
     }
 
     pub fn on_team_discoverability_set(
@@ -996,15 +964,9 @@ impl UserWorkspaces {
         discoverable: bool,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                team_client
-                    .set_team_discoverability(team_uid, discoverable)
-                    .await
-            },
-            Self::on_team_discoverability_set,
-        );
+        let _ = (team_uid, discoverable);
+        ctx.emit(UserWorkspacesEvent::ToggleTeamDiscoverabilitySuccess);
+        ctx.notify();
     }
 
     pub fn on_join_team_with_team_discovery(
@@ -1027,11 +989,9 @@ impl UserWorkspaces {
         team_uid: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move { team_client.join_team_with_team_discovery(team_uid).await },
-            Self::on_join_team_with_team_discovery,
-        );
+        let _ = team_uid;
+        ctx.emit(UserWorkspacesEvent::JoinTeamWithTeamDiscoverySuccess);
+        ctx.notify();
     }
 
     fn on_fetch_discoverable_teams(
@@ -1049,11 +1009,8 @@ impl UserWorkspaces {
 
     /// Make request to get list of discoverable teams for a user
     pub fn fetch_discoverable_teams(&mut self, ctx: &mut ModelContext<Self>) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move { team_client.get_discoverable_teams().await },
-            Self::on_fetch_discoverable_teams,
-        );
+        // OpenWarp(本地化,Phase 5):本地无可发现 team → 返回空列表。
+        self.update_joinable_teams(vec![], ctx);
     }
 
     fn on_team_ownership_transferred(
@@ -1076,11 +1033,9 @@ impl UserWorkspaces {
         new_owner_email: String,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move { team_client.transfer_team_ownership(new_owner_email).await },
-            Self::on_team_ownership_transferred,
-        );
+        let _ = new_owner_email;
+        ctx.emit(UserWorkspacesEvent::TransferTeamOwnershipSuccess);
+        ctx.notify();
     }
 
     fn on_team_member_role_set(
@@ -1105,15 +1060,9 @@ impl UserWorkspaces {
         role: MembershipRole,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                team_client
-                    .set_team_member_role(user_uid, team_uid, role)
-                    .await
-            },
-            Self::on_team_member_role_set,
-        );
+        let _ = (user_uid, team_uid, role);
+        ctx.emit(UserWorkspacesEvent::SetTeamMemberRoleSuccess);
+        ctx.notify();
     }
 
     pub fn on_delete_team_invite(
@@ -1137,15 +1086,9 @@ impl UserWorkspaces {
         invitee_email: String,
         ctx: &mut ModelContext<Self>,
     ) {
-        let team_client = self.team_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                team_client
-                    .delete_team_invite(team_uid, invitee_email)
-                    .await
-            },
-            Self::on_delete_team_invite,
-        );
+        let _ = (team_uid, invitee_email);
+        ctx.emit(UserWorkspacesEvent::DeleteTeamInvite);
+        ctx.notify();
     }
 
     pub fn on_generate_upgrade_link(
@@ -1191,15 +1134,12 @@ impl UserWorkspaces {
         team_uid: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
-        let workspace_client = self.workspace_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                workspace_client
-                    .generate_stripe_billing_portal_link(team_uid)
-                    .await
-            },
-            Self::on_generate_stripe_billing_portal_link,
-        );
+        // OpenWarp(本地化,Phase 5):本地无 billing,返回 Stripe 空链接。
+        let _ = team_uid;
+        ctx.emit(UserWorkspacesEvent::GenerateStripeBillingPortalLink(
+            String::new(),
+        ));
+        ctx.notify();
     }
 
     pub fn update_usage_based_pricing_settings(
@@ -1209,19 +1149,9 @@ impl UserWorkspaces {
         max_monthly_spend_cents: Option<u32>,
         ctx: &mut ModelContext<Self>,
     ) {
-        let workspace_client = self.workspace_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                workspace_client
-                    .update_usage_based_pricing_settings(
-                        team_uid,
-                        usage_based_pricing_enabled,
-                        max_monthly_spend_cents,
-                    )
-                    .await
-            },
-            Self::on_update_workspace_metadata,
-        );
+        let _ = (team_uid, usage_based_pricing_enabled, max_monthly_spend_cents);
+        ctx.emit(UserWorkspacesEvent::UpdateWorkspaceSettingsSuccess);
+        ctx.notify();
     }
 
     fn on_update_workspace_metadata(
@@ -1255,15 +1185,9 @@ impl UserWorkspaces {
         credits: i32,
         ctx: &mut ModelContext<Self>,
     ) {
-        let workspace_client = self.workspace_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                workspace_client
-                    .purchase_addon_credits(team_uid, credits)
-                    .await
-            },
-            Self::on_purchase_addon_credits,
-        );
+        let _ = (team_uid, credits);
+        ctx.emit(UserWorkspacesEvent::PurchaseAddonCreditsSuccess);
+        ctx.notify();
     }
 
     fn on_purchase_addon_credits(
@@ -1289,12 +1213,9 @@ impl UserWorkspaces {
         ctx.notify();
     }
 
-    pub fn refresh_ai_overages(&mut self, ctx: &mut ModelContext<Self>) {
-        let workspace_client = self.workspace_client.clone();
-        let _ = ctx.spawn(
-            async move { workspace_client.refresh_ai_overages().await },
-            Self::on_refresh_ai_overages,
-        );
+    pub fn refresh_ai_overages(&mut self, _ctx: &mut ModelContext<Self>) {
+        // OpenWarp(本地化,Phase 5):本地无云端 AI overages 查询,no-op。
+        // 调用点 (`blocklist/controller.rs::maybe_refresh_ai_overages`) UI 不发起有意义的更新。
     }
 
     pub fn update_addon_credits_settings(
@@ -1305,20 +1226,14 @@ impl UserWorkspaces {
         selected_auto_reload_credit_denomination: Option<i32>,
         ctx: &mut ModelContext<Self>,
     ) {
-        let workspace_client = self.workspace_client.clone();
-        let _ = ctx.spawn(
-            async move {
-                workspace_client
-                    .update_addon_credits_settings(
-                        team_uid,
-                        auto_reload_enabled,
-                        max_monthly_spend_cents,
-                        selected_auto_reload_credit_denomination,
-                    )
-                    .await
-            },
-            Self::on_update_workspace_metadata,
+        let _ = (
+            team_uid,
+            auto_reload_enabled,
+            max_monthly_spend_cents,
+            selected_auto_reload_credit_denomination,
         );
+        ctx.emit(UserWorkspacesEvent::UpdateWorkspaceSettingsSuccess);
+        ctx.notify();
     }
 
     fn on_refresh_ai_overages(&mut self, result: Result<AiOverages>, ctx: &mut ModelContext<Self>) {
