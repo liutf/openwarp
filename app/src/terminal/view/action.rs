@@ -16,7 +16,6 @@ use warpui::EntityId;
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::AIAgentExchangeId;
-use crate::ai::blocklist::codebase_index_speedbump_banner::CodebaseIndexSpeedbumpBannerAction;
 use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
 use crate::server::telemetry::{AgentModeRewindEntrypoint, PaletteSource, ToggleBlockFilterSource};
 use crate::terminal::available_shells::AvailableShell;
@@ -363,7 +362,6 @@ pub enum TerminalAction {
     },
     ToggleAutoexecuteMode,
     ToggleQueueNextPrompt,
-    CodebaseIndexSpeedbumpBanner(CodebaseIndexSpeedbumpBannerAction),
     AgentModeSetupSpeedbumpBanner(AgentModeSetupSpeedbumpBannerAction),
     AnonymousUserAISignUpBanner(AnonymousUserLoginBannerAction),
     ResumeConversation,
@@ -639,9 +637,6 @@ impl fmt::Debug for TerminalAction {
             DeleteAttachment { index } => write!(f, "DeleteAttachment({index:?})"),
             ToggleAutoexecuteMode => write!(f, "ToggleAutoexecuteMode"),
             ToggleQueueNextPrompt => write!(f, "ToggleQueueNextPrompt"),
-            CodebaseIndexSpeedbumpBanner(action) => {
-                write!(f, "CodebaseIndexSpeedbumpBanner({action:?})")
-            }
             AgentModeSetupSpeedbumpBanner(action) => {
                 write!(f, "AgentModeSetupSpeedbumpBanner({action:?})")
             }

@@ -3115,7 +3115,6 @@ onboarding-ai-feature-warp-agents = Warp agents
 onboarding-ai-feature-oz-cloud-agents-platform = Oz cloud agents platform
 onboarding-ai-feature-next-command-predictions = Next command predictions
 onboarding-ai-feature-prompt-suggestions = Prompt suggestions
-onboarding-ai-feature-codebase-context = Codebase context
 onboarding-ai-feature-remote-control-agents = Remote control with Claude Code, Codex, and other agents
 onboarding-ai-feature-agents-over-ssh = Agents over SSH
 onboarding-agent-title = Customize your Warp Agent

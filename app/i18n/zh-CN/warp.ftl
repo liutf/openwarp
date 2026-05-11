@@ -2997,7 +2997,6 @@ onboarding-ai-feature-warp-agents = Warp 智能体
 onboarding-ai-feature-oz-cloud-agents-platform = Oz 云端智能体平台
 onboarding-ai-feature-next-command-predictions = 下一条命令预测
 onboarding-ai-feature-prompt-suggestions = 提示词建议
-onboarding-ai-feature-codebase-context = 代码库上下文
 onboarding-ai-feature-remote-control-agents = 通过 Claude Code、Codex 等智能体进行远程控制
 onboarding-ai-feature-agents-over-ssh = SSH 上的智能体
 onboarding-agent-title = 自定义你的 Warp 智能体

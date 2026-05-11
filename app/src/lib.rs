@@ -445,17 +445,6 @@ impl LaunchMode {
         }
     }
 
-    /// Returns `true` if running in app mode or via `agent run` to permit codebase indexing.
-    fn supports_indexing(&self) -> bool {
-        match self {
-            LaunchMode::CommandLine { command, .. } => {
-                matches!(command, CliCommand::Agent(AgentCommand::Run { .. }))
-            }
-            LaunchMode::App { .. } | LaunchMode::Test { .. } => true,
-            LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon => false,
-        }
-    }
-
     /// Whether or not to start a crash recovery process (on platforms that support it).
     #[cfg(enable_crash_recovery)]
     pub(crate) fn crash_recovery_enabled(&self) -> bool {
@@ -2599,8 +2588,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ReadImageFiles,
         #[cfg(feature = "usage_based_pricing")]
         FeatureFlag::UsageBasedPricing,
-        #[cfg(feature = "cross_repo_context")]
-        FeatureFlag::CrossRepoContext,
         #[cfg(feature = "ai_context_menu")]
         FeatureFlag::AIContextMenuEnabled,
         #[cfg(feature = "at_menu_outside_of_ai_mode")]
@@ -2633,8 +2620,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::TabCloseButtonOnLeft,
         #[cfg(feature = "profiles_design_revamp")]
         FeatureFlag::ProfilesDesignRevamp,
-        #[cfg(feature = "search_codebase_ui")]
-        FeatureFlag::SearchCodebaseUI,
         #[cfg(feature = "changed_lines_only_apply_diff_result")]
         FeatureFlag::ChangedLinesOnlyApplyDiffResult,
         #[cfg(feature = "linked_code_blocks")]

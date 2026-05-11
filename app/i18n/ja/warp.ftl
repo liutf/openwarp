@@ -3106,7 +3106,6 @@ onboarding-ai-feature-warp-agents = Warp エージェント
 onboarding-ai-feature-oz-cloud-agents-platform = Oz クラウドエージェントプラットフォーム
 onboarding-ai-feature-next-command-predictions = 次コマンド予測
 onboarding-ai-feature-prompt-suggestions = プロンプト候補
-onboarding-ai-feature-codebase-context = コードベースコンテキスト
 onboarding-ai-feature-remote-control-agents = Claude Code、Codex、その他エージェントによるリモートコントロール
 onboarding-ai-feature-agents-over-ssh = SSH 経由のエージェント
 onboarding-agent-title = Warp エージェントをカスタマイズ
