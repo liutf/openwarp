@@ -1232,10 +1232,15 @@ impl AIClient for ServerApi {
         // OpenWarp(本地化,Phase 3b 主体):原实现走 GraphQL `update_agent_task` mutation。
         // 本地化无云端 task 概念,直接 no-op。`driver.rs` 内 4 处调用点(state 更新 /
         // conversation_id 关联 / session_id 关联 / 错误上报)在本地无任何后续消费者。
-        let _ = (task_id, task_state, session_id, conversation_id, status_message);
+        let _ = (
+            task_id,
+            task_state,
+            session_id,
+            conversation_id,
+            status_message,
+        );
         Ok(())
     }
-
 
     async fn spawn_agent(
         &self,

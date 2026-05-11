@@ -41,8 +41,7 @@ use crate::{
     network::NetworkStatus,
     search::files::model::FileSearchModel,
     server::{
-        cloud_objects::update_manager::UpdateManager,
-        server_api::ServerApiProvider,
+        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
         sync_queue::SyncQueue,
     },
     settings::PrivacySettings,

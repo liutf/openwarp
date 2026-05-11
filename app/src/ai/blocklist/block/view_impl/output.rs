@@ -129,9 +129,7 @@ use warpui::{
     },
     keymap::Keystroke,
     platform::{Cursor, OperatingSystem},
-    ui_components::{
-        components::{Coords, UiComponent, UiComponentStyles},
-    },
+    ui_components::components::{Coords, UiComponent, UiComponentStyles},
     Action, AppContext, Element, ModelHandle, SingletonEntity, View, ViewHandle,
 };
 

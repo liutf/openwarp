@@ -122,10 +122,7 @@ pub struct CreateTeamResponse {
 
 impl UserWorkspaces {
     #[cfg(test)]
-    pub fn mock(
-        cached_workspaces: Vec<Workspace>,
-        _ctx: &mut ModelContext<Self>,
-    ) -> Self {
+    pub fn mock(cached_workspaces: Vec<Workspace>, _ctx: &mut ModelContext<Self>) -> Self {
         // In tests, avoid subscribing to [`ServerExperiments`] because it
         // requires us to register that singleton along with _its_ dependencies
         // for all tests that use [`UserWorkspaces`] (a lot of them do).
@@ -1129,7 +1126,11 @@ impl UserWorkspaces {
         max_monthly_spend_cents: Option<u32>,
         ctx: &mut ModelContext<Self>,
     ) {
-        let _ = (team_uid, usage_based_pricing_enabled, max_monthly_spend_cents);
+        let _ = (
+            team_uid,
+            usage_based_pricing_enabled,
+            max_monthly_spend_cents,
+        );
         ctx.emit(UserWorkspacesEvent::UpdateWorkspaceSettingsSuccess);
         ctx.notify();
     }

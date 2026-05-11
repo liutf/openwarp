@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
-        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
-        Flex, MainAxisSize, ParentElement, ScrollbarWidth,
+        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, Flex,
+        MainAxisSize, ParentElement, ScrollbarWidth,
     },
     AppContext, Element, Entity, FocusContext, ModelHandle, TypedActionView, View, ViewContext,
 };
@@ -175,7 +175,6 @@ impl AIFactView {
         self.focus(ctx);
         ctx.notify();
     }
-
 }
 
 impl Entity for AIFactView {

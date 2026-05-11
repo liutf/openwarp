@@ -21,9 +21,9 @@ use crate::ai::agent::{
     ImageContext, InsertReviewCommentsResult, OutputModelInfo, PassiveCodeDiffEntry,
     PassiveSuggestionResultType, PassiveSuggestionTrigger, ReadDocumentsResult, ReadFilesResult,
     ReadMCPResourceResult, ReadShellCommandOutputResult, RequestCommandOutputResult,
-    RequestFileEditsResult, ServerOutputId,
-    Shared, ShellCommandCompletedTrigger, ShellCommandError, SuggestNewConversationResult,
-    SuggestPromptResult, TransferShellCommandControlToUserResult, UpdatedFileContext,
+    RequestFileEditsResult, ServerOutputId, Shared, ShellCommandCompletedTrigger,
+    ShellCommandError, SuggestNewConversationResult, SuggestPromptResult,
+    TransferShellCommandControlToUserResult, UpdatedFileContext,
     WriteToLongRunningShellCommandResult,
 };
 use crate::ai::block_context::BlockContext;

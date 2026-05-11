@@ -140,7 +140,9 @@ impl TeamClient for ServerApi {
         _team_uid: ServerId,
         _domain: String,
     ) -> Result<WorkspacesMetadataWithPricing> {
-        Err(anyhow!("Invite link domain restriction disabled in OpenWarp"))
+        Err(anyhow!(
+            "Invite link domain restriction disabled in OpenWarp"
+        ))
     }
 
     async fn delete_invite_link_domain_restriction(
@@ -148,7 +150,9 @@ impl TeamClient for ServerApi {
         _team_uid: ServerId,
         _domain_uid: ServerId,
     ) -> Result<WorkspacesMetadataWithPricing> {
-        Err(anyhow!("Invite link domain restriction disabled in OpenWarp"))
+        Err(anyhow!(
+            "Invite link domain restriction disabled in OpenWarp"
+        ))
     }
 
     async fn create_team(

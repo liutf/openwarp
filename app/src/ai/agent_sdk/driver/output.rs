@@ -15,9 +15,8 @@ pub mod text {
             AIAgentActionType, AIAgentInput, AIAgentOutput, AIAgentOutputMessageType, AIAgentTodo,
             ArtifactCreatedData, CallMCPToolResult, FileGlobResult, FileGlobV2Result, GrepResult,
             ReadFilesResult, ReadMCPResourceResult, RequestCommandOutputResult,
-            RequestFileEditsResult, SuggestNewConversationResult,
-            SuggestPromptResult, TodoOperation, WebFetchStatus, WebSearchStatus,
-            WriteToLongRunningShellCommandResult,
+            RequestFileEditsResult, SuggestNewConversationResult, SuggestPromptResult,
+            TodoOperation, WebFetchStatus, WebSearchStatus, WriteToLongRunningShellCommandResult,
         },
         AIAgentActionResultType,
     };
@@ -482,8 +481,7 @@ pub mod json {
             AIAgentOutputMessageType, AIAgentTodo, ArtifactCreatedData, CallMCPToolResult,
             FileContext, FileGlobResult, FileGlobV2Result, GrepResult, ReadFilesResult,
             ReadMCPResourceResult, RequestCommandOutputResult, RequestFileEditsResult,
-            SubagentCall, TodoOperation,
-            WriteToLongRunningShellCommandResult,
+            SubagentCall, TodoOperation, WriteToLongRunningShellCommandResult,
         },
         AIAgentActionResultType,
     };

@@ -329,10 +329,7 @@ fn fast_path_walk_depth_bounded() {
 
     let entry = ProjectContextModel::scan_fast_path(&deep);
     // 走不到顶层,拿不到规则
-    assert!(
-        entry.rules.is_empty(),
-        "深度超限后不应 stat 到顶层规则文件"
-    );
+    assert!(entry.rules.is_empty(), "深度超限后不应 stat 到顶层规则文件");
     // walked_dir_stamps 不超过 MAX_WALK_DEPTH
     assert!(entry.walked_dir_stamps.len() <= 6);
 }

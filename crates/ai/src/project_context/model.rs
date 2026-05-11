@@ -4,6 +4,19 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use warpui::{Entity, ModelContext, SingletonEntity};
 
+/// 默认规则文件列表。顺序 = 优先级(靠前者优先);同目录多个文件
+/// 同时存在时 `RuleAtPath::respected_rule()` 只取优先级最高的一个。
+///
+/// - WARP.md  项目原生约定。
+/// - AGENTS.md 社区通用(opencode / Cursor / Cline 等都识别)。
+/// - CLAUDE.md Claude Code 原生约定，让从 Claude Code 迁过来的项目一键可用。
+///
+/// 扩展新名称只需调整本数组(插入位置 = 优先级),`RuleAtPath`
+/// 以 priority-indexed slot 数组实现，不需动 if-else 逻辑。
+///
+/// 定义在 `cfg_if` 外部，以便不编译 `local_fs` 的路径(WASM / 测试)也能引用。
+pub(crate) const RULES_FILE_PATTERN: &[&str] = &["WARP.md", "AGENTS.md", "CLAUDE.md"];
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         use repo_metadata::entry::{Entry, FileMetadata};
@@ -11,9 +24,11 @@ cfg_if::cfg_if! {
         use repo_metadata::{Repository, DirectoryWatcher, RepositoryUpdate};
         use ignore::gitignore::Gitignore;
         use async_channel::Sender;
-        use std::time::{Duration, Instant, SystemTime};
+        // `instant::Instant` 是本仓库全局约定的跨平台(含 WASM)起点,代替
+        // `std::time::Instant`。使用 `clippy.toml` 中的 disallowed_types 强制。
+        use instant::Instant;
+        use std::time::{Duration, SystemTime};
 
-        const RULES_FILE_PATTERN: [&str; 2] = ["WARP.md", "AGENTS.md"];
         const MAX_SCAN_DEPTH: usize = 3;
         const MAX_FILES_TO_SCAN: usize = 5000;
 
@@ -21,11 +36,12 @@ cfg_if::cfg_if! {
         //
         // 主用途:cd 进入新 git 仓库后,异步 `index_and_store_rules` 完成前的
         // 时间窗口内,`pending_context` 同步调用此 fast-path 直接 stat + 读 cwd
-        // 及其祖先目录的规则文件,保证 AGENTS.md / WARP.md **不会因为异步竞争漏注入**。
+        // 及其祖先目录的规则文件,保证 AGENTS.md / WARP.md / CLAUDE.md
+        // **不会因为异步竞争漏注入**。
         // 正常路径(`find_applicable_rules`)一旦可用,fast-path 让位并清缓存。
         //
         // UI 不卡顿保障:
-        //   - 单次最坏 `MAX_WALK_DEPTH * RULES_FILE_PATTERN.len()` = 12 次 metadata
+        //   - 单次最坏 `MAX_WALK_DEPTH * RULES_FILE_PATTERN.len()` 次 metadata
         //     + 命中文件 `read_to_string`(规则文件一般几 KB,Windows NTFS < 1ms/文件)。
         //   - `FAST_PATH_BUDGET` 时间预算硬截断,超时立即返回已收集部分,绝不阻塞。
         //   - 稳态命中(目录无变化)只做 stat,不重读文件;mtime / size / parent-dir-mtime

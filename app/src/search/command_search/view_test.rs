@@ -4,10 +4,8 @@ use crate::{
     cloud_object::model::persistence::CloudModel,
     network::NetworkStatus,
     server::{
-        cloud_objects::update_manager::UpdateManager,
-        server_api::ServerApiProvider,
-        sync_queue::SyncQueue,
-        telemetry::context_provider::AppTelemetryContextProvider,
+        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
+        sync_queue::SyncQueue, telemetry::context_provider::AppTelemetryContextProvider,
     },
     settings_view::keybindings::KeybindingChangedNotifier,
     system::SystemStats,

@@ -6,13 +6,13 @@ use super::{
         AIAutonomyPolicy, AddonCreditsSettings, AdminEnablementSetting, AiAutonomySettings,
         AiPermissionsSettings, AmbientAgentsPolicy, BillingMetadata,
         CloudConversationStorageSettings, CustomerType, DelinquencyStatus, EmailInvite,
-        EnterpriseSecretRegex, HostEnablementSetting, InstanceShape,
-        InviteLinkDomainRestriction, LinkSharingSettings, LlmSettings, SandboxedAgentSettings,
-        SecretRedactionSettings, SessionSharingPolicy, SharedNotebooksPolicy,
-        SharedWorkflowsPolicy, TelemetryDataCollectionPolicy, TelemetrySettings, Tier,
-        UgcCollectionEnablementSetting, UgcCollectionSettings, UgcDataCollectionPolicy,
-        UsageBasedPricingPolicy, WarpAiPolicy, Workspace, WorkspaceInviteCode, WorkspaceMember,
-        WorkspaceMemberUsageInfo, WorkspaceSettings, WorkspaceSizePolicy,
+        EnterpriseSecretRegex, HostEnablementSetting, InstanceShape, InviteLinkDomainRestriction,
+        LinkSharingSettings, LlmSettings, SandboxedAgentSettings, SecretRedactionSettings,
+        SessionSharingPolicy, SharedNotebooksPolicy, SharedWorkflowsPolicy,
+        TelemetryDataCollectionPolicy, TelemetrySettings, Tier, UgcCollectionEnablementSetting,
+        UgcCollectionSettings, UgcDataCollectionPolicy, UsageBasedPricingPolicy, WarpAiPolicy,
+        Workspace, WorkspaceInviteCode, WorkspaceMember, WorkspaceMemberUsageInfo,
+        WorkspaceSettings, WorkspaceSizePolicy,
     },
 };
 use crate::{
@@ -26,9 +26,9 @@ use crate::{
     server::ids::ServerId,
     settings::AgentModeCommandExecutionPredicate,
     workspaces::workspace::{
-        AiOverages, BonusGrantsPurchased, ByoApiKeyPolicy,
-        EnterpriseCreditsAutoReloadPolicy, EnterprisePayAsYouGoPolicy, MultiAdminPolicy,
-        PurchaseAddOnCreditsPolicy, UsageBasedPricingSettings,
+        AiOverages, BonusGrantsPurchased, ByoApiKeyPolicy, EnterpriseCreditsAutoReloadPolicy,
+        EnterprisePayAsYouGoPolicy, MultiAdminPolicy, PurchaseAddOnCreditsPolicy,
+        UsageBasedPricingSettings,
     },
 };
 use crate::{
@@ -48,8 +48,8 @@ use warp_graphql::{
     billing::{
         AiAutonomyPolicy as GqlAiAutonomyPolicy, AmbientAgentsPolicy as GqlAmbientAgentsPolicy,
         BillingMetadata as GqlBillingMetadata, BonusGrant as GqlBonusGrant,
-        ByoApiKeyPolicy as GqlByoApiKeyPolicy,
-        CustomerType as GqlCustomerType, DelinquencyStatus as GqlDelinquencyStatus,
+        ByoApiKeyPolicy as GqlByoApiKeyPolicy, CustomerType as GqlCustomerType,
+        DelinquencyStatus as GqlDelinquencyStatus,
         EnterpriseCreditsAutoReloadPolicy as GqlEnterpriseCreditsAutoReloadPolicy,
         EnterprisePayAsYouGoPolicy as GqlEnterprisePayAsYouGoPolicy,
         InstanceShape as GqlInstanceShape, MultiAdminPolicy as GqlMultiAdminPolicy,

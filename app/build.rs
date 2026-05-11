@@ -488,8 +488,7 @@ fn embed_resource_file(target_dir: &Path) {
     // 保持 installer `MyAppPublisher`、Cargo bundle metadata `copyright`、
     // 进程 AUMID `dev.openwarp.OpenWarp` 三处全局对齐，避免 Windows Shell
     // 因 publisher / product name fingerprint 不一致而 miss 掉 icon cache。
-    let publisher =
-        env::var("WARP_APP_PUBLISHER").unwrap_or_else(|_| "OpenWarp".to_owned());
+    let publisher = env::var("WARP_APP_PUBLISHER").unwrap_or_else(|_| "OpenWarp".to_owned());
     let (ver_major, ver_minor, ver_patch, ver_build) = parse_file_version_quad(&version);
 
     let icon_path = Path::new("channels")

@@ -33,9 +33,7 @@ impl TeamUpdateManager {
         model_event_sender: Option<SyncSender<ModelEvent>>,
         _ctx: &mut ModelContext<Self>,
     ) -> Self {
-        Self {
-            model_event_sender,
-        }
+        Self { model_event_sender }
     }
 
     #[cfg(test)]
