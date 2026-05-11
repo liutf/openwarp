@@ -14,11 +14,15 @@
 // `api_keys` / `get_user` / `get_conversation_usage` — 唯一消费方
 // `AuthClient impl for ServerApi` 已随 server_api/auth.rs 整文件物理删,
 // AuthManager 本地 stub 不再请求用户/会话用量元数据。
+//
+// OpenWarp Wave 4-1:再删 2 个 managed-secrets query —
+// `list_managed_secrets` / `managed_secret_config` — 唯一消费方
+// `ManagedSecretsClient impl for ServerApi` 已 stub 为 `Ok(empty)`。
+// `task_secrets` query 文件保留:其内嵌的 `ManagedSecretValue` enum 仍被
+// `crates/managed_secrets` 与 `app/src/ai/agent_sdk` 多处作为 BYOP 类型 import。
 pub mod get_oauth_connect_tx_status;
 pub mod get_scheduled_agent_history;
 pub mod get_updated_cloud_objects;
 pub mod get_workspaces_metadata_for_user;
-pub mod list_managed_secrets;
 pub mod list_warp_dev_images;
-pub mod managed_secret_config;
 pub mod task_secrets;

@@ -48,7 +48,6 @@ use crate::settings_view;
 
 use crate::ChannelState;
 
-use ::http::header::CONTENT_LENGTH;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, FixedOffset};
 use instant::Instant;
@@ -470,12 +469,13 @@ impl ServerApi {
     }
 
     /// Returns ambient agent headers to attach to requests.
-    async fn ambient_agent_headers(&self) -> Result<Vec<(&'static str, String)>> {
-        let workload_token = self
-            .get_or_create_ambient_workload_token()
-            .await
-            .context("Failed to get ambient workload token")?;
-
+    ///
+    /// OpenWarp Wave 4-1:原调用 `get_or_create_ambient_workload_token().await`
+    /// 获取 `X-Warp-Ambient-Workload-Token` header,W3-1 后该 token 代库永返 None
+    /// (企业号 federation 路径随 auth.rs 下线),直接删掉该分支。`task_id`
+    /// + `agent_source` header 仍按设置动态附加,运行时 BYOP 路径可能仍会
+    /// `set_ambient_agent_task_id(Some(_))`。
+    fn ambient_agent_headers(&self) -> Vec<(&'static str, String)> {
         let task_id = self
             .ambient_agent_task_id
             .read()
@@ -484,12 +484,11 @@ impl ServerApi {
 
         let agent_source = self.agent_source.as_ref().map(|s| s.as_str().to_string());
 
-        Ok(workload_token
-            .map(|token| (AMBIENT_WORKLOAD_TOKEN_HEADER, token))
+        task_id
+            .map(|id| (CLOUD_AGENT_ID_HEADER, id))
             .into_iter()
-            .chain(task_id.map(|id| (CLOUD_AGENT_ID_HEADER, id)))
             .chain(agent_source.map(|s| (AGENT_SOURCE_HEADER, s)))
-            .collect())
+            .collect()
     }
 
     // OpenWarp Wave 3-1:`create_oauth_client` 随 `OAuth2Client` 类型与
@@ -544,7 +543,7 @@ impl ServerApi {
             #[cfg(not(feature = "agent_mode_evals"))]
             let mut headers = std::collections::HashMap::new();
 
-            for (name, value) in self.ambient_agent_headers().await? {
+            for (name, value) in self.ambient_agent_headers() {
                 headers.insert(name.to_string(), value);
             }
 
@@ -645,7 +644,7 @@ impl ServerApi {
             request = request.bearer_auth(token);
         }
 
-        for (name, value) in self.ambient_agent_headers().await? {
+        for (name, value) in self.ambient_agent_headers() {
             request = request.header(name, value);
         }
 
@@ -711,7 +710,7 @@ impl ServerApi {
             request = request.bearer_auth(token);
         }
 
-        for (name, value) in self.ambient_agent_headers().await? {
+        for (name, value) in self.ambient_agent_headers() {
             request = request.header(name, value);
         }
 
@@ -739,7 +738,7 @@ impl ServerApi {
             request = request.bearer_auth(token);
         }
 
-        for (name, value) in self.ambient_agent_headers().await? {
+        for (name, value) in self.ambient_agent_headers() {
             request = request.header(name, value);
         }
 
@@ -835,7 +834,7 @@ impl ServerApi {
             request = request.bearer_auth(token);
         }
 
-        for (name, value) in self.ambient_agent_headers().await? {
+        for (name, value) in self.ambient_agent_headers() {
             request = request.header(name, value);
         }
 
@@ -851,33 +850,7 @@ impl ServerApi {
         }
     }
 
-    /// Sends an authenticated empty POST request to /client/login, which signals to the server
-    /// that the user is logged in.
-    pub async fn notify_login(&self) {
-        match self.get_or_refresh_access_token().await {
-            Ok(auth_token) => {
-                let url = format!("{}/client/login", ChannelState::server_root_url());
-                let mut request = self.client.post(&url);
-                if let Some(token) = auth_token.as_bearer_token() {
-                    request = request.bearer_auth(token);
-                }
-                request = request
-                    // Set the content-length header to 0 because the request has no body.
-                    // Otherwise, the server will return a 411 error. (In other cases, setting
-                    // content-type is sufficient (elides the content-length requirement), but
-                    // since this request has no body, it makes more sense to set content-length.
-                    .header(CONTENT_LENGTH, 0);
-
-                let response = request.send().await;
-                if let Err(err) = response {
-                    log::error!("Failed to send POST request to /client/login: {err:?}");
-                }
-            }
-            Err(err) => {
-                log::error!("Could not retrieve access token for notifying user login: {err:?}");
-            }
-        }
-    }
+    // OpenWarp Wave 4-1:`notify_login` (原向 /client/login 发生命令心跳) 0 消费方,物理删。
 
     /// Synchronously sends a [`TelemetryEvent`] to the Rudderstack API. Prefer not to call this
     /// directly, use the macros defined in crate::server::telemetry::macros. If telemetry is

@@ -1,5 +1,3 @@
-pub mod create_managed_secret;
-pub mod delete_managed_secret;
 pub mod generate_commands;
 pub mod generate_metadata_for_command;
 // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
@@ -30,8 +28,11 @@ pub mod generate_metadata_for_command;
 // `mint_custom_token` — 唯一消费方
 // `AuthClient impl for ServerApi` 已随 server_api/auth.rs 整文件物理删,
 // 上层 AuthManager 改为本地 stub,不再发起任何云端身份请求。
-// `issue_task_identity_token` 仍被 BYOP AWS / GCP federated credentials 链路
-// (`ai/aws_credentials.rs` + `ai/agent_sdk/federate.rs` + `cloud_provider/aws.rs`)
-// 消费,保留 operation 文件。
-pub mod issue_task_identity_token;
-pub mod update_managed_secret;
+//
+// OpenWarp Wave 4-1:再删 4 个 managed-secrets mutation —
+// `create_managed_secret` / `delete_managed_secret` / `update_managed_secret`
+// / `issue_task_identity_token` — 唯一消费方 `ManagedSecretsClient impl for ServerApi`
+// 已 stub(Err 或 Ok 空集合)。`issue_task_identity_token` 虽然有 BYOP AWS/GCP
+// 调用点(`ai/aws_credentials.rs` 等),但实际服务端为 warp.dev OIDC issuer,
+// OpenWarp 无可达服务端,链路必失败,值得物理删 GraphQL 端入口,只在 client impl
+// 处统一返回 disabled 错误,callers 走错误处理路径。
