@@ -42,7 +42,6 @@ pub const AMBIENT_WORKLOAD_TOKEN_HEADER: &str = "X-Warp-Ambient-Workload-Token";
 /// Header key for the cloud agent task ID attached to requests from ambient agents.
 pub const CLOUD_AGENT_ID_HEADER: &str = "X-Warp-Cloud-Agent-ID";
 
-use crate::server::telemetry::TelemetryApi;
 use crate::settings::PrivacySettingsSnapshot;
 use crate::settings_view;
 
@@ -402,8 +401,10 @@ pub struct ServerApi {
     client: Arc<http_client::Client>,
     auth_state: Arc<AuthState>,
     event_sender: async_channel::Sender<ServerApiEvent>,
-    // TODO(jeff): Make `TelemetryApi` another type of client, and move it off `ServerApi`.
-    telemetry_api: TelemetryApi,
+    // OpenWarp Wave 5-2:`telemetry_api: TelemetryApi` 字段物理删 — TelemetryApi
+    // 以全 no-op 实现存在于 `server/telemetry/mod.rs`，但 `flush_telemetry_events` /
+    // `flush_and_persist_events` / `flush_persisted_events_to_rudder` 均 0 外部消费，
+    // `send_telemetry_event` 仅 view.rs:25525 一处调用，直接折 no-op 到本 struct。
     last_server_time: Arc<Mutex<Option<ServerTime>>>,
     // OpenWarp Wave 3-1:原 `oauth_client: self::auth::OAuth2Client` 随 auth.rs 一同
     // 物理删。CLI headless device auth 路径在 OpenWarp 下线。
@@ -435,7 +436,6 @@ impl ServerApi {
             client: Arc::new(http_client::Client::new()),
             auth_state,
             event_sender,
-            telemetry_api: TelemetryApi::new(),
             last_server_time: Arc::new(Mutex::new(None)),
             ambient_workload_token: Arc::new(Mutex::new(None)),
             ambient_agent_task_id: Arc::new(RwLock::new(None)),
@@ -453,7 +453,6 @@ impl ServerApi {
             client: Arc::new(http_client::Client::new_for_test()),
             auth_state: Arc::new(AuthState::new_for_test()),
             event_sender: tx,
-            telemetry_api: TelemetryApi::new(),
             last_server_time: Arc::new(Mutex::new(None)),
             ambient_workload_token: Arc::new(Mutex::new(None)),
             ambient_agent_task_id: Arc::new(RwLock::new(None)),
@@ -850,40 +849,28 @@ impl ServerApi {
         }
     }
 
-    // OpenWarp Wave 4-1:`notify_login` (原向 /client/login 发生命令心跳) 0 消费方,物理删。
+    // OpenWarp Wave 4-1:`notify_login` (原向 /client/login 发生命令心跳) 0 消费方，物理删。
 
-    /// Synchronously sends a [`TelemetryEvent`] to the Rudderstack API. Prefer not to call this
-    /// directly, use the macros defined in crate::server::telemetry::macros. If telemetry is
-    /// disabled, this is a no-op.
+    /// 向 远端 Rudderstack 发送 [`TelemetryEvent`]。
+    ///
+    /// OpenWarp Wave 5-2：Rudder 网络层在 Phase 4-2(commit 60e37e160)中已全部物理删。
+    /// 本方法仅为保留 `terminal/view.rs:25525` 一处现有调用点的调用签名兼容 —
+    /// 方法体仅做轻量类型检查 + drain，返回 `Ok(())`。后续如果以后只剩
+    /// 零 个调用点可连同该方法一同删。隔层的 `TelemetryApi` struct 与
+    /// `flush_telemetry_events` / `flush_and_persist_events` / `flush_persisted_events_to_rudder`
+    /// 均 0 外部消费 — 随本 PR 一起物理删。
     pub async fn send_telemetry_event(
         &self,
         event: impl TelemetryEvent,
-        settings_snapshot: PrivacySettingsSnapshot,
+        _settings_snapshot: PrivacySettingsSnapshot,
     ) -> Result<()> {
-        let user_id = self.auth_state.user_id();
-        let anonymous_id = self.auth_state.anonymous_id();
-        self.telemetry_api
-            .send_telemetry_event(user_id, anonymous_id, event, settings_snapshot)
-            .await
+        let _ = event.name();
+        Ok(())
     }
 
-    /// Drains all queued [`TelemetryEvent`]s into Rudderstack requests containing the corresponding
-    /// batch of events. Events are queued using the [`send_telemetry_from_ctx`] or
-    /// [`send_telemetry_from_app_ctx`] macros. If telemetry is disabled for the user, this flushes
-    /// the UI framework event queue and does nothing with them (no request is made).
-    ///
-    /// Returns the number of events that were flushed.
-    pub async fn flush_telemetry_events(
-        &self,
-        settings_snapshot: PrivacySettingsSnapshot,
-    ) -> Result<usize> {
-        self.telemetry_api.flush_events(settings_snapshot).await
-    }
-
-    // OpenWarp(Wave 3-2):`flush_persisted_events_to_rudder` / `persist_telemetry_events` /
-    // `generate_ai_input_suggestions` / `generate_am_query_suggestions` / `predict_am_queries`
-    // 等方法均 0 外部消费,已物理删。原 `flush_persisted_events_to_rudder` 用来
-    // 发送 batched Rudder 请求(本地落盘事件 → 发送 Rudder),现由 telemetry 本地化全 stub。
+    // OpenWarp Wave 5-2：`flush_telemetry_events` 及 `flush_persisted_events_to_rudder` /
+    // `persist_telemetry_events` 等均 0 外部消费，随 `TelemetryApi` 一同物理删。
+    // 历史语义：本地落盘 telemetry batch 回放 → Rudderstack。
 
     /// 语音转写 — OpenWarp 已禁用。
     ///
