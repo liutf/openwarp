@@ -28,7 +28,6 @@ pub mod record_object_action;
 pub mod remove_object_guest;
 pub mod remove_object_link_permissions;
 pub mod request_bonus;
-pub mod send_referral_invite_emails;
 pub mod set_object_link_permissions;
 pub mod share_block;
 pub mod transfer_generic_string_object_owner;

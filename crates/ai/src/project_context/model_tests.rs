@@ -336,3 +336,120 @@ fn fast_path_walk_depth_bounded() {
     // walked_dir_stamps 不超过 MAX_WALK_DEPTH
     assert!(entry.walked_dir_stamps.len() <= 6);
 }
+
+// ---------------------------------------------------------------------------
+// CLAUDE.md 默认识别专项测试
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_finds_claude_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    std::fs::write(cwd.join("CLAUDE.md"), "claude rules").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert_eq!(entry.rules.len(), 1, "CLAUDE.md 应被默认识别");
+    assert_eq!(entry.rules[0].content, "claude rules");
+    assert_eq!(entry.rules[0].path, cwd.join("CLAUDE.md"));
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_warp_md_priority_over_claude_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    std::fs::write(cwd.join("WARP.md"), "warp wins").unwrap();
+    std::fs::write(cwd.join("CLAUDE.md"), "claude loses").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert_eq!(entry.rules.len(), 1);
+    assert_eq!(entry.rules[0].content, "warp wins");
+    assert_eq!(entry.rules[0].path, cwd.join("WARP.md"));
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn fast_path_agents_md_priority_over_claude_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd = tmp.path().canonicalize().unwrap();
+    std::fs::write(cwd.join("AGENTS.md"), "agents wins").unwrap();
+    std::fs::write(cwd.join("CLAUDE.md"), "claude loses").unwrap();
+
+    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert_eq!(entry.rules.len(), 1);
+    assert_eq!(entry.rules[0].content, "agents wins");
+    assert_eq!(entry.rules[0].path, cwd.join("AGENTS.md"));
+}
+
+#[test]
+fn upsert_rule_recognizes_claude_md() {
+    // 纯内存路径(不走 fs)验证 ProjectRules::upsert_rule 能识别 CLAUDE.md
+    let mut rules = ProjectRules::default();
+    rules.upsert_rule(Path::new("/a/CLAUDE.md"), "claude in /a".to_string());
+
+    let path = PathBuf::from("/a/sub/file.rs");
+    let result = rules.find_active_or_applicable_rules(&path).active_rules;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].path, PathBuf::from("/a/CLAUDE.md"));
+    assert_eq!(result[0].content, "claude in /a");
+}
+
+#[test]
+fn upsert_rule_priority_three_way() {
+    // 同目录同时存在 WARP / AGENTS / CLAUDE → 只拿优先级最高的 WARP
+    let mut rules = ProjectRules::default();
+    rules.upsert_rule(Path::new("/a/WARP.md"), "warp".to_string());
+    rules.upsert_rule(Path::new("/a/AGENTS.md"), "agents".to_string());
+    rules.upsert_rule(Path::new("/a/CLAUDE.md"), "claude".to_string());
+
+    let result = rules
+        .find_active_or_applicable_rules(&PathBuf::from("/a/x.rs"))
+        .active_rules;
+    assert_eq!(result.len(), 1, "同目录多个规则文件只取优先级最高的");
+    assert_eq!(result[0].path, PathBuf::from("/a/WARP.md"));
+}
+
+#[test]
+fn upsert_rule_priority_agents_beats_claude() {
+    // 同目录 AGENTS + CLAUDE → 取 AGENTS
+    let mut rules = ProjectRules::default();
+    rules.upsert_rule(Path::new("/a/AGENTS.md"), "agents".to_string());
+    rules.upsert_rule(Path::new("/a/CLAUDE.md"), "claude".to_string());
+
+    let result = rules
+        .find_active_or_applicable_rules(&PathBuf::from("/a/x.rs"))
+        .active_rules;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].path, PathBuf::from("/a/AGENTS.md"));
+}
+
+#[test]
+fn remove_rule_recognizes_claude_md() {
+    let mut rules = ProjectRules::default();
+    rules.upsert_rule(Path::new("/a/CLAUDE.md"), "x".to_string());
+    rules.upsert_rule(Path::new("/a/AGENTS.md"), "y".to_string());
+
+    let removed = rules.remove_rule(Path::new("/a/CLAUDE.md"));
+    assert!(removed.is_some(), "能移除 CLAUDE.md");
+
+    // 移除 CLAUDE 后 AGENTS 仍保留为该目录的生效规则
+    let result = rules
+        .find_active_or_applicable_rules(&PathBuf::from("/a/x.rs"))
+        .active_rules;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].path, PathBuf::from("/a/AGENTS.md"));
+}
+
+#[test]
+fn upsert_rule_case_insensitive_filename() {
+    // 大小写不敏感:claude.md / Agents.MD 也能识别
+    let mut rules = ProjectRules::default();
+    rules.upsert_rule(Path::new("/a/claude.md"), "lower".to_string());
+
+    let result = rules
+        .find_active_or_applicable_rules(&PathBuf::from("/a/x.rs"))
+        .active_rules;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].path, PathBuf::from("/a/claude.md"));
+}

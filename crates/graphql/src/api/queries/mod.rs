@@ -8,7 +8,6 @@ pub mod get_conversation_usage;
 pub mod get_feature_model_choices;
 pub mod get_integrations_using_environment;
 pub mod get_oauth_connect_tx_status;
-pub mod get_referral_info;
 pub mod get_request_limit_info;
 pub mod get_scheduled_agent_history;
 pub mod get_simple_integrations;
