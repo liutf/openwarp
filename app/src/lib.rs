@@ -2668,12 +2668,12 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::FileTree,
         #[cfg(feature = "allow_ignoring_input_suggestions")]
         FeatureFlag::AllowIgnoringInputSuggestions,
-        #[cfg(feature = "ambient_agents_command_line")]
-        FeatureFlag::AmbientAgentsCommandLine,
-        #[cfg(feature = "ambient_agents_image_upload")]
-        FeatureFlag::AmbientAgentsImageUpload,
-        #[cfg(feature = "scheduled_ambient_agents")]
-        FeatureFlag::ScheduledAmbientAgents,
+        // OpenWarp(本地化,Phase 3b-1):ambient agent / agent management view 类 flag 下柜。
+        // 运行期 `is_enabled()` 返回 false,UI 入口隐藏 / 云端调度代码路径不可达。
+        // Cargo features 仍保留(保证边缘可编译),Phase 6 统一清理 default 中的未使用 features。
+        // 涉及: AmbientAgentsCommandLine / AmbientAgentsImageUpload / ScheduledAmbientAgents /
+        // AgentManagementView / AgentManagementDetailsView / AmbientAgentsRTC。
+        // BYOP agent 本地运行不依赖以上任何一项。
         #[cfg(feature = "code_launch_modal")]
         FeatureFlag::CodeLaunchModal,
         #[cfg(feature = "api_key_authentication")]
@@ -2722,10 +2722,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::RevertToCheckpoints,
         #[cfg(feature = "rewind_slash_command")]
         FeatureFlag::RewindSlashCommand,
-        #[cfg(feature = "agent_management_view")]
-        FeatureFlag::AgentManagementView,
-        #[cfg(feature = "agent_management_details_view")]
-        FeatureFlag::AgentManagementDetailsView,
+        // OpenWarp(本地化,Phase 3b-1):AgentManagementView / AgentManagementDetailsView 下柜
+        // (上方统一说明),略过不注入。
         #[cfg(feature = "agent_view")]
         FeatureFlag::AgentView,
         #[cfg(feature = "agent_view_block_context")]
@@ -2750,8 +2748,7 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ConfigurableToolbar,
         #[cfg(feature = "agent_view_prompt_chip")]
         FeatureFlag::AgentViewPromptChip,
-        #[cfg(feature = "ambient_agents_rtc")]
-        FeatureFlag::AmbientAgentsRTC,
+        // OpenWarp(本地化,Phase 3b-1):AmbientAgentsRTC 下柜(上方统一说明)。
         #[cfg(feature = "classic_completions")]
         FeatureFlag::ClassicCompletions,
         #[cfg(feature = "force_classic_completions")]

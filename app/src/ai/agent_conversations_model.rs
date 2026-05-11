@@ -6,10 +6,10 @@ use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::{format_credits, BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::conversation_navigation::ConversationNavigationData;
-use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
+use crate::auth::auth_manager::AuthManagerEvent;
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::network::{NetworkStatus, NetworkStatusEvent, NetworkStatusKind};
-use crate::server::cloud_objects::update_manager::{UpdateManager, UpdateManagerEvent};
+use crate::server::cloud_objects::update_manager::UpdateManagerEvent;
 use crate::server::ids::{ServerId, SyncId};
 use crate::server::retry_strategies::{
     is_transient_http_error, OUT_OF_BAND_REQUEST_RETRY_STRATEGY, PERIODIC_POLL_RETRY_STRATEGY,
@@ -857,62 +857,25 @@ impl Entity for AgentConversationsModel {
 impl SingletonEntity for AgentConversationsModel {}
 
 impl AgentConversationsModel {
-    pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        // If FF not enabled, return an empty model and don't sync any tasks.
-        if !FeatureFlag::AgentManagementView.is_enabled() {
-            return Self {
-                tasks: HashMap::new(),
-                conversations: HashMap::new(),
-                in_flight_poll_abort_handle: None,
-                next_poll_abort_handle: None,
-                active_data_consumers_per_window: HashMap::new(),
-                has_finished_initial_load: true,
-                manually_opened_task_ids: HashSet::new(),
-                task_fetch_state: HashMap::new(),
-            };
-        }
-
-        // Subscribe to network status and window manager to inform whether we should poll for new task data
-        let network_status = NetworkStatus::handle(ctx);
-        ctx.subscribe_to_model(&network_status, Self::handle_network_status_changed);
-        let window_manager = WindowManager::handle(ctx);
-        ctx.subscribe_to_model(&window_manager, Self::handle_window_state_changed);
-
-        // Subscribe to auth events to retry initial sync when user becomes available
-        let auth_manager = AuthManager::handle(ctx);
-        ctx.subscribe_to_model(&auth_manager, Self::handle_auth_manager_event);
-
-        let history_model = BlocklistAIHistoryModel::handle(ctx);
-        ctx.subscribe_to_model(&history_model, move |me, event, ctx| {
-            me.handle_history_event(event, ctx);
-        });
-
-        // Subscribe to UpdateManager for RTC task updates
-        if FeatureFlag::AmbientAgentsRTC.is_enabled() {
-            let update_manager = UpdateManager::handle(ctx);
-            ctx.subscribe_to_model(&update_manager, Self::handle_update_manager_event);
-        }
-
-        let mut model = Self {
+    pub fn new(_ctx: &mut ModelContext<Self>) -> Self {
+        // OpenWarp(本地化,Phase 3b-1):AgentConversationsModel 原本负责轮询/探听云端
+        // ambient agent tasks 与 cloud conversation metadata,是 Agent Management View 的数据底层。
+        // 本地化场景下无云端调度,该模型下转为空壳:
+        //   - 不订阅 NetworkStatus / WindowManager / AuthManager / BlocklistAIHistoryModel / UpdateManager
+        //   - 不调 sync_conversations 发本地/云端 RPC
+        //   - has_finished_initial_load 直接为 true,使 UI 查询以空集合返回
+        // 依赖本模型的 UI(如 management view / toolbar item)在 Phase 3b-1 同步隐藏,
+        // 详见同商郻 commit 文档。BYOP agent 本地运行不依赖该模型,零影响。
+        Self {
             tasks: HashMap::new(),
             conversations: HashMap::new(),
             in_flight_poll_abort_handle: None,
             next_poll_abort_handle: None,
             active_data_consumers_per_window: HashMap::new(),
-            has_finished_initial_load: false,
+            has_finished_initial_load: true,
             manually_opened_task_ids: HashSet::new(),
             task_fetch_state: HashMap::new(),
-        };
-
-        // Only sync local conversations if we're not in CLI mode. Server-side data
-        // (tasks and cloud conversation metadata) is fetched on AuthComplete instead of
-        // here to avoid duplicate requests at startup.
-        if AppExecutionMode::as_ref(ctx).can_fetch_agent_runs_for_management() {
-            model.sync_conversations(ctx);
-        } else {
-            model.has_finished_initial_load = true;
         }
-        model
     }
 
     pub fn is_loading(&self) -> bool {
