@@ -13,8 +13,6 @@ pub mod referral;
 // 在 app/ 外 0 消费,UserWorkspaces / TeamUpdateManager 已在 Phase 5 本地化为 no-op。
 
 use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::ai::voice::transcribe::{TranscribeRequest, TranscribeResponse};
-use crate::auth::AuthManager;
 use crate::auth::AuthState;
 use crate::server::graphql::default_request_options;
 use ai::AIClient;
@@ -46,7 +44,6 @@ use instant::Instant;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use warp_core::telemetry::TelemetryEvent;
@@ -351,34 +348,16 @@ cfg_if::cfg_if! {
 /// An event related to the server API itself (and not a particular API call).
 /// Most errors should be handled in callbacks to individual APIs, rather than sent over the
 /// server API channel.
-#[derive(Clone)]
+//
+// OpenWarp Wave 6-1:`NeedsReauth` 与 `AccessTokenRefreshed` 两个 variant 在 Wave 3-1
+// 删 auth 子系统后已无任何 emit 点(全仓 0 处 `try_send`),订阅链(`wire_auth_token_rotation`
+// + `ServerApiProvider::new` 内 match 分支)随之物理删。
+#[derive(Clone, Debug)]
 pub enum ServerApiEvent {
     /// We made a staging API call that was blocked, which may indicate a firewall misconfiguration.
     StagingAccessBlocked,
-    /// The user's access token was invalid, so they need to reauth before they can make
-    /// requests to warp-server.
-    NeedsReauth,
     /// The user's account has been disabled.
     UserAccountDisabled,
-    /// The current bearer token was refreshed.
-    AccessTokenRefreshed {
-        #[cfg_attr(target_family = "wasm", allow(dead_code))]
-        token: String,
-    },
-}
-
-impl fmt::Debug for ServerApiEvent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::StagingAccessBlocked => f.write_str("StagingAccessBlocked"),
-            Self::NeedsReauth => f.write_str("NeedsReauth"),
-            Self::UserAccountDisabled => f.write_str("UserAccountDisabled"),
-            Self::AccessTokenRefreshed { .. } => f
-                .debug_struct("AccessTokenRefreshed")
-                .field("token", &"<redacted>")
-                .finish(),
-        }
-    }
 }
 
 /// An API wrapper struct with methods to requests to warp-server.
@@ -397,8 +376,9 @@ pub struct ServerApi {
     last_server_time: Arc<Mutex<Option<ServerTime>>>,
     // OpenWarp Wave 3-1:原 `oauth_client: self::auth::OAuth2Client` 随 auth.rs 一同
     // 物理删。CLI headless device auth 路径在 OpenWarp 下线。
-    /// Cached ambient workload token for requests from ambient agents.
-    ambient_workload_token: Arc<Mutex<Option<warp_isolation_platform::WorkloadToken>>>,
+    // OpenWarp Wave 6-1:`ambient_workload_token: Arc<Mutex<Option<WorkloadToken>>>` 字段
+    // 物理删 — 仅在 `new` / `new_for_test` 初始化为 `None`,永无 get/set;
+    // `get_or_create_ambient_workload_token` 实现已是 `Ok(None)` 不读字段。
     /// The ambient agent task ID for requests from cloud agents.
     ambient_agent_task_id: Arc<RwLock<Option<AmbientAgentTaskId>>>,
     /// The source of agent runs (e.g. CLI, GitHub Action). Set once at startup and immutable.
@@ -426,7 +406,6 @@ impl ServerApi {
             auth_state,
             event_sender,
             last_server_time: Arc::new(Mutex::new(None)),
-            ambient_workload_token: Arc::new(Mutex::new(None)),
             ambient_agent_task_id: Arc::new(RwLock::new(None)),
             agent_source,
             #[cfg(feature = "agent_mode_evals")]
@@ -443,7 +422,6 @@ impl ServerApi {
             auth_state: Arc::new(AuthState::new_for_test()),
             event_sender: tx,
             last_server_time: Arc::new(Mutex::new(None)),
-            ambient_workload_token: Arc::new(Mutex::new(None)),
             ambient_agent_task_id: Arc::new(RwLock::new(None)),
             agent_source: None,
             #[cfg(feature = "agent_mode_evals")]
@@ -483,11 +461,13 @@ impl ServerApi {
     // `request_device_code` / `exchange_device_access_token` RPC 一同物理删。
     // CLI headless device auth 路径在 OpenWarp 下线。
 
-    // OpenWarp Wave 3-1:`get_or_refresh_access_token()` 与
-    // `get_or_create_ambient_workload_token()` 原是 `AuthClient` trait method。
+    // OpenWarp Wave 3-1:`get_or_refresh_access_token()` 原是 `AuthClient` trait method。
     // trait 随 auth.rs 一同物理删,但 ServerApi 内部仍有 ~9 处调用。
     // 这里提供本地 stub:bearer token 取 AuthState 本地缓存(使用 `crate::auth::AuthToken`
-    // 作为返回类型以兼容原 trait 签名),ambient workload token 返回 None。
+    // 作为返回类型以兼容原 trait 签名)。
+    //
+    // OpenWarp Wave 6-1:`get_or_create_ambient_workload_token` 全仓 0 外部消费 + 实现
+    // 已是 `Ok(None)`,物理删。
 
     pub async fn get_or_refresh_access_token(&self) -> Result<crate::auth::AuthToken> {
         Ok(self
@@ -495,10 +475,6 @@ impl ServerApi {
             .credentials()
             .map(|c| c.bearer_token())
             .unwrap_or(crate::auth::AuthToken::NoAuth))
-    }
-
-    pub async fn get_or_create_ambient_workload_token(&self) -> Result<Option<String>> {
-        Ok(None)
     }
 
     pub fn send_graphql_request<'a, QF, O: warp_graphql::client::Operation<QF> + Send + 'a>(
@@ -649,21 +625,11 @@ impl ServerApi {
     // `persist_telemetry_events` 等均 0 外部消费，随 `TelemetryApi` 一同物理删。
     // 历史语义：本地落盘 telemetry batch 回放 → Rudderstack。
 
-    /// 语音转写 — OpenWarp 已禁用。
-    ///
-    /// BYOP genai chat 协议无法承载音频流,且 OpenWarp 已剥离 Warp Inc 云端,
-    /// `/ai/transcribe` 端点不可达。直接返回 `Disabled`,UI 层显示禁用提示。
-    ///
-    /// OpenWarp(Wave 3-2):`ServerApi::transcribe` 本身在 app/ 外 0 消费(语音 UI
-    /// 走 `Transcriber` trait),但 `TranscribeError` 作为 trait 返回类型仍被
-    /// `voice/transcriber.rs` 消费。本方法留下作为 stub 防未来重接,实现仅返回 Disabled。
-    pub async fn transcribe(
-        &self,
-        _request: &TranscribeRequest,
-    ) -> Result<TranscribeResponse, TranscribeError> {
-        log::debug!("transcribe disabled in OpenWarp (BYOP cannot carry audio)");
-        Err(TranscribeError::Disabled)
-    }
+    // OpenWarp Wave 6-1:`pub async fn transcribe` 全仓 0 外部消费(语音 UI 走
+    // `Transcriber` trait,实现在 `voice/transcriber.rs`),物理删 + 同步清
+    // `TranscribeRequest` / `TranscribeResponse` import。`TranscribeError` enum 本身
+    // 保留,继续被 `voice/transcriber.rs` 消费。
+
 
     pub async fn generate_multi_agent_output(
         &self,
@@ -806,24 +772,13 @@ impl ServerApiProvider {
         let (event_sender, event_receiver) = async_channel::bounded(10);
         let server_api = ServerApi::new(auth_state.clone(), event_sender, agent_source);
 
+        // OpenWarp Wave 6-1:原 `NeedsReauth` 分支调 `AuthManager::set_needs_reauth(true)`,
+        // Wave 6-1 删 `ServerApiEvent::NeedsReauth` variant 后,剩余 variant 全部走
+        // re-emit 路径,match 简化为直传。`AuthManager::set_needs_reauth` 函数本体保留
+        // (`root_view.rs` web handoff 路径仍调,但已是 no-op)。
         ctx.spawn_stream_local(
             event_receiver,
-            move |_, event, ctx| {
-                match event {
-                    ServerApiEvent::NeedsReauth => {
-                        // AuthManager depends on a reference to ServerApi, so ServerApi can't easily
-                        // hold a ref to AuthManager. To get around this, we emit an event on ServerApi
-                        // and handle calling the AuthManager here instead.
-                        AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
-                            auth_manager.set_needs_reauth(true, ctx);
-                        });
-                    }
-                    // Re-emit the event for subscribers.
-                    // TODO: we probably want a different type for the event emitted to subscribers
-                    // from the one that's used for the async channel.
-                    _ => ctx.emit(event),
-                }
-            },
+            move |_, event, ctx| ctx.emit(event),
             |_, _| {},
         );
         Self {

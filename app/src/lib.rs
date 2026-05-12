@@ -1334,8 +1334,9 @@ fn initialize_app(
     ctx.add_singleton_model(|_ctx| SyncedInputState::new());
 
     ctx.add_singleton_model(remote_server::manager::RemoteServerManager::new);
-    #[cfg(not(target_family = "wasm"))]
-    remote_server::wire_auth_token_rotation(ctx);
+    // OpenWarp Wave 6-1:`remote_server::wire_auth_token_rotation(ctx)` 调用随
+    // `ServerApiEvent::AccessTokenRefreshed` variant + `wire_auth_token_rotation`
+    // 函数本体一同物理删。
 
     log::info!(
         "Starting warp with channel state {} and version {:?}",
