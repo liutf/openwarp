@@ -28,21 +28,17 @@
 //   本任务只删 21 个 mutation + 0 query(get_cloud_object 唯一消费方在
 //   `fetch_single_cloud_object` impl,删之)。
 
+use crate::cloud_object::SerializedModel;
 use crate::{
     cloud_object::{
-        model::{
-            actions::{ObjectActionHistory, ObjectActionType},
-            generic_string_model::GenericStringObjectId,
-        },
-        BulkCreateCloudObjectResult, BulkCreateGenericStringObjectsRequest,
-        CreateCloudObjectResult, CreateObjectRequest, CreatedCloudObject,
-        GenericStringObjectFormat, GenericStringObjectUniqueKey, ObjectDeleteResult, ObjectIdType,
-        ObjectMetadataUpdateResult, ObjectPermissionUpdateResult, ObjectPermissionsUpdateData,
-        ObjectType, ObjectsToUpdate, Owner, Revision, RevisionAndLastEditor, ServerFolder,
-        ServerMetadata, ServerNotebook, ServerObject, ServerPermissions, ServerWorkflow,
-        UpdateCloudObjectResult,
+        model::generic_string_model::GenericStringObjectId, BulkCreateCloudObjectResult,
+        BulkCreateGenericStringObjectsRequest, CreateCloudObjectResult, CreateObjectRequest,
+        CreatedCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
+        ObjectDeleteResult, ObjectIdType, ObjectMetadataUpdateResult, ObjectType, ObjectsToUpdate,
+        Owner, Revision, RevisionAndLastEditor, ServerFolder, ServerMetadata, ServerNotebook,
+        ServerObject, ServerPermissions, ServerWorkflow, UpdateCloudObjectResult,
     },
-    drive::{folders::FolderId, sharing::SharingAccessLevel},
+    drive::folders::FolderId,
     notebooks::NotebookId,
     server::{
         cloud_objects::update_manager::{GetCloudObjectResponse, InitialLoadResponse},
@@ -51,24 +47,13 @@ use crate::{
     },
     workflows::WorkflowId,
 };
-use crate::cloud_object::SerializedModel;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::collections::HashMap;
-use warp_graphql::object_permissions::AccessLevel;
 use warp_graphql::scalars::time::ServerTimestamp;
-
-/// Identifies a guest to remove from an object.
-#[derive(Clone, Debug)]
-pub enum GuestIdentifier {
-    /// Remove a user guest by their email address.
-    Email(String),
-    /// Remove a team guest by their team UID.
-    TeamUid(ServerId),
-}
 
 #[cfg_attr(test, automock)]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
@@ -171,8 +156,6 @@ pub trait ObjectClient: 'static + Send + Sync {
 
     async fn delete_object(&self, id: ServerId) -> Result<ObjectDeleteResult>;
 
-    async fn empty_trash(&self, owner: Owner) -> Result<ObjectDeleteResult>;
-
     async fn move_object(
         &self,
         id: ServerId,
@@ -181,46 +164,7 @@ pub trait ObjectClient: 'static + Send + Sync {
         object_type: ObjectType,
     ) -> Result<bool>;
 
-    async fn record_object_action(
-        &self,
-        id: ServerId,
-        action_type: ObjectActionType,
-        timestamp: DateTime<Utc>,
-        data: Option<String>,
-    ) -> Result<ObjectActionHistory>;
-
     async fn leave_object(&self, id: ServerId) -> Result<ObjectDeleteResult>;
-
-    async fn set_object_link_permissions(
-        &self,
-        object_id: ServerId,
-        access_level: SharingAccessLevel,
-    ) -> Result<ObjectPermissionUpdateResult>;
-
-    async fn remove_object_link_permissions(
-        &self,
-        object_id: ServerId,
-    ) -> Result<ObjectPermissionUpdateResult>;
-
-    async fn add_object_guests(
-        &self,
-        object_id: ServerId,
-        guest_emails: Vec<String>,
-        access_level: AccessLevel,
-    ) -> Result<ObjectPermissionsUpdateData>;
-
-    async fn update_object_guests(
-        &self,
-        object_id: ServerId,
-        guest_emails: Vec<String>,
-        access_level: AccessLevel,
-    ) -> Result<ServerPermissions>;
-
-    async fn remove_object_guest(
-        &self,
-        object_id: ServerId,
-        guest: GuestIdentifier,
-    ) -> Result<ServerPermissions>;
 
     /// Fetches the last-used timestamps for all cloud environments.
     ///
@@ -538,15 +482,6 @@ impl ObjectClient for ServerApi {
         })
     }
 
-    async fn empty_trash(&self, _owner: Owner) -> Result<ObjectDeleteResult> {
-        // OpenWarp:Empty Trash 在 UpdateManager 中已纯本地化(遍历 CloudModel 找
-        // owner 匹配 + is_trashed 后调 `on_object_delete_success`),此 RPC 路径
-        // 不会被走到。返回空 deleted_ids 仅为类型兼容。
-        Ok(ObjectDeleteResult::Success {
-            deleted_ids: Vec::new(),
-        })
-    }
-
     async fn move_object(
         &self,
         _id: ServerId,
@@ -558,82 +493,13 @@ impl ObjectClient for ServerApi {
         Ok(true)
     }
 
-    // ----- C 类:record_object_action / leave_object —— Wave1-2 已 stub -----
-
-    async fn record_object_action(
-        &self,
-        _id: ServerId,
-        _action_type: ObjectActionType,
-        _timestamp: DateTime<Utc>,
-        _data: Option<String>,
-    ) -> Result<ObjectActionHistory> {
-        // OpenWarp Wave1-2:云端审计日志下线。sync_queue 在本地化场景下不会真正
-        // 入队这项(NetworkStatus offline + should_dequeue 为 false),但 trait 必须保留。
-        // 不能返回 Ok(空 ObjectActionHistory):上层 `maybe_overwrite_object_action_history`
-        // 会用返回值覆写本地 actions 列表,丢失本地动作历史。
-        Err(anyhow!(
-            "Cloud object action audit log is disabled in OpenWarp"
-        ))
-    }
+    // ----- C 类:leave_object —— Wave1-2 已 stub -----
 
     async fn leave_object(&self, _id: ServerId) -> Result<ObjectDeleteResult> {
         // OpenWarp Wave1-2:云端 share 已下线,本地无法 leave 一个共享对象。
         // 返回 Err 让 UpdateManager 走 RequestFailed 分支,只弹失败 toast 不变本地 SQLite。
         // UI 入口 (DriveIndex::leave_object) 在本地机型下本不可达(无 share 对象)。
         Err(anyhow!("Leave shared object is disabled in OpenWarp"))
-    }
-
-    // ----- C 类:link / guest sharing —— no-op 成功 -----
-
-    async fn set_object_link_permissions(
-        &self,
-        _object_id: ServerId,
-        _access_level: SharingAccessLevel,
-    ) -> Result<ObjectPermissionUpdateResult> {
-        // OpenWarp Wave 2-1:云端 link sharing 已下线。UI 入口(Drive sharing modal)
-        // 在 Phase 2a 已删,残留 trait 仅 stub 不可达。
-        Ok(ObjectPermissionUpdateResult::Success)
-    }
-
-    async fn remove_object_link_permissions(
-        &self,
-        _object_id: ServerId,
-    ) -> Result<ObjectPermissionUpdateResult> {
-        Ok(ObjectPermissionUpdateResult::Success)
-    }
-
-    async fn add_object_guests(
-        &self,
-        _object_id: ServerId,
-        _guest_emails: Vec<String>,
-        _access_level: AccessLevel,
-    ) -> Result<ObjectPermissionsUpdateData> {
-        // OpenWarp Wave 2-1:无 guest 概念,返回空 permissions + 空 profiles。
-        Ok(ObjectPermissionsUpdateData {
-            permissions: synth_personal_permissions(),
-            profiles: Vec::new(),
-        })
-    }
-
-    async fn update_object_guests(
-        &self,
-        _object_id: ServerId,
-        _guest_emails: Vec<String>,
-        _access_level: AccessLevel,
-    ) -> Result<ServerPermissions> {
-        Ok(synth_personal_permissions())
-    }
-
-    async fn remove_object_guest(
-        &self,
-        _object_id: ServerId,
-        _guest: GuestIdentifier,
-    ) -> Result<ServerPermissions> {
-        // OpenWarp Wave1-2:云端 share / guest 概念已下线。UpdateManager 中原
-        // `remove_object_guest` / `remove_ai_conversation_guest` 调用点已随 Phase 2c-2
-        // (update_object 本地化) 一同移除。trait 保留以兼容 FakeObjectClient 与
-        // 未来可能复活的 UI 入口。
-        Err(anyhow!("Object guest management is disabled in OpenWarp"))
     }
 
     async fn fetch_environment_last_task_run_timestamps(

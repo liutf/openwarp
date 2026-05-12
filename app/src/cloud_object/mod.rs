@@ -66,10 +66,7 @@ use crate::{
         workflow_enum::CloudWorkflowEnumModel, CloudWorkflow, CloudWorkflowModel, WorkflowId,
         WorkflowSource,
     },
-    workspaces::{
-        user_profiles::{UserProfileWithUID, UserProfiles},
-        user_workspaces::UserWorkspaces,
-    },
+    workspaces::{user_profiles::UserProfiles, user_workspaces::UserWorkspaces},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -1155,21 +1152,6 @@ fn get_top_folder_trashed_ts(
         }
     }
     None
-}
-
-#[derive(Clone, Debug)]
-pub enum ObjectPermissionUpdateResult {
-    Success, // TODO: we should return the full permissions here
-    Failure,
-}
-
-#[derive(Clone, Debug)]
-pub struct ObjectPermissionsUpdateData {
-    /// Updated permissions for the modified object.
-    pub permissions: ServerPermissions,
-    /// Relevant user profiles for the permissions change. This is not *all* profiles that the user
-    /// should have access to.
-    pub profiles: Vec<UserProfileWithUID>,
 }
 
 #[derive(Clone, Debug)]
