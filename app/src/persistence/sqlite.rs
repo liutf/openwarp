@@ -1170,7 +1170,8 @@ fn save_pane_state(
         LeafContents::GetStarted => GET_STARTED_PANE_KIND,
         LeafContents::Welcome { .. } => WELCOME_PANE_KIND,
         LeafContents::AIDocument(_) => AI_DOCUMENT_PANE_KIND,
-        LeafContents::EnvironmentManagement(_) | LeafContents::SshServer { .. } => {
+        // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
+        LeafContents::SshServer { .. } => {
             // These pane types are filtered out before this function is
             // called; see `LeafContents::is_persisted` and the skip in
             // `save_app_state`. Reaching this arm would mean a `pane_nodes`
@@ -1322,9 +1323,7 @@ fn save_pane_state(
                 .values(workflow)
                 .execute(conn)?;
         }
-        LeafContents::EnvironmentManagement(_) => {
-            // Unreachable: filtered by `is_persisted` in `save_app_state`.
-        }
+        // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents arm 随 variant 一同物理删。
         LeafContents::Settings(settings_pane_snapshot) => {
             let current_page = match settings_pane_snapshot {
                 SettingsPaneSnapshot::Local { current_page, .. } => current_page,

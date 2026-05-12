@@ -36,7 +36,7 @@ pub use request_usage_model::*;
 use warpui::AppContext;
 #[cfg(not(target_family = "wasm"))]
 pub mod agent_sdk;
-pub mod cloud_agent_settings;
+// OpenWarp Wave 7-3:`cloud_agent_settings` 随 Cloud Mode UI 子系统物理删。
 pub mod cloud_environments;
 pub mod execution_profiles;
 pub mod facts;

@@ -823,10 +823,8 @@ fn handle_terminal_view_event(
                 group.terminal_with_open_summarization_dialog = is_open.then_some(terminal_pane_id);
                 ctx.notify();
             }
-            Event::EnvironmentSetupModeSelectorToggled { is_open } => {
-                group.pane_with_open_environment_setup_mode_selector = is_open.then_some(pane_id);
-                ctx.notify();
-            }
+            // OpenWarp Wave 7-3:`Event::EnvironmentSetupModeSelectorToggled` handler 随
+            // Cloud Mode UI 子系统物理删。
             Event::AnonymousUserSignup => ctx.emit(pane_group::Event::AnonymousUserSignup),
             #[cfg(feature = "local_fs")]
             Event::OpenFileWithTarget {
@@ -929,9 +927,8 @@ fn handle_terminal_view_event(
                     initial_content: initial_content.clone(),
                 });
             }
-            Event::OpenEnvironmentManagementPane => {
-                ctx.emit(crate::pane_group::Event::OpenEnvironmentManagementPane);
-            }
+            // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event forwarding 随 Cloud Mode UI
+            // 子系统物理删。
             #[cfg(feature = "local_fs")]
             Event::FileRenamed { old_path, new_path } => {
                 ctx.emit(pane_group::Event::FileRenamed {

@@ -16,7 +16,7 @@ use crate::code::editor_management::CodeSource;
 use crate::drive::OpenWarpDriveObjectSettings;
 use crate::root_view::quake_mode_window_id;
 use crate::server::ids::SyncId;
-use crate::settings_view::{environments_page::EnvironmentsPage, SettingsSection};
+use crate::settings_view::SettingsSection;
 use crate::tab::SelectedTabColor;
 use crate::terminal::ShellLaunchData;
 use crate::themes::theme::AnsiColorIdentifier;
@@ -123,7 +123,8 @@ pub enum LeafContents {
     AIDocument(AIDocumentPaneSnapshot),
     Code(CodePaneSnapShot),
     EnvVarCollection(EnvVarCollectionPaneSnapshot),
-    EnvironmentManagement(EnvironmentManagementPaneSnapshot),
+    // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents variant 随 Cloud Mode UI
+    // 子系统物理删。
     Workflow(WorkflowPaneSnapshot),
     Settings(SettingsPaneSnapshot),
     AIFact(AIFactPaneSnapshot),
@@ -157,12 +158,10 @@ impl LeafContents {
     /// restoration to fail and the whole tab to disappear on restart.
     pub(crate) fn is_persisted(&self) -> bool {
         match self {
-            // Environment management panes are opened on-demand via workspace
-            // actions and have no persistable state.
-            LeafContents::EnvironmentManagement(_)
+            // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
             // SSH server editor:数据(host/user/...)持久化在 ssh_servers 表里,
             // pane 本身只是 view,关掉再打开没差别。
-            | LeafContents::SshServer { .. } => false,
+            LeafContents::SshServer { .. } => false,
             LeafContents::Terminal(_)
             | LeafContents::Notebook(_)
             | LeafContents::AIDocument(_)
@@ -270,10 +269,7 @@ pub enum EnvVarCollectionPaneSnapshot {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct EnvironmentManagementPaneSnapshot {
-    pub mode: EnvironmentsPage,
-}
+// OpenWarp Wave 7-3:`EnvironmentManagementPaneSnapshot` 随 LeafContents variant 一同物理删。
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SettingsPaneSnapshot {

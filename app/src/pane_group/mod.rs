@@ -170,7 +170,7 @@ pub use pane::ai_fact_pane::AIFactPane;
 pub use pane::code_diff_pane::CodeDiffPane;
 pub use pane::code_pane::CodePane;
 pub use pane::env_var_collection_pane::EnvVarCollectionPane;
-pub use pane::environment_management_pane::EnvironmentManagementPane;
+// OpenWarp Wave 7-3:`EnvironmentManagementPane` 随 Cloud Mode UI 子系统物理删。
 pub use pane::execution_profile_editor_pane::ExecutionProfileEditorPane;
 pub use pane::file_pane::FilePane;
 pub use pane::notebook_pane::NotebookPane;
@@ -636,7 +636,8 @@ pub enum Event {
         initial_content: Option<String>,
     },
     OpenAddRulePane,
-    OpenEnvironmentManagementPane,
+    // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event 随 Cloud Mode UI
+    // 子系统物理删。
     OpenFilesPalette {
         source: PaletteSource,
     },
@@ -828,9 +829,9 @@ pub struct PaneGroup {
     terminal_with_open_summarization_dialog: Option<TerminalPaneId>,
 
     /// Pane with an open environment setup mode selector modal (rendered at tab level).
-    pane_with_open_environment_setup_mode_selector: Option<PaneId>,
-    /// Pane with an open agent-assisted environment modal (rendered at tab level).
-    pane_with_open_agent_assisted_environment_modal: Option<PaneId>,
+    // OpenWarp Wave 7-3:`pane_with_open_environment_setup_mode_selector` /
+    // `pane_with_open_agent_assisted_environment_modal` 随 Cloud Mode UI 子系统
+    // 物理删。
 
     /// If the left panel is open for this pane group
     pub left_panel_open: bool,
@@ -1863,14 +1864,8 @@ impl PaneGroup {
                     };
                     Ok((PaneData::new(pane_id), focus))
                 }
-            }
-            LeafContents::EnvironmentManagement(_) => {
-                // Environment management panes are not restored from persistence.
-                // They are opened on-demand via workspace actions.
-                Err(anyhow::anyhow!(
-                    "Environment management panes are not restored"
-                ))
-            }
+            } // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents arm 随 Cloud Mode UI
+              // 子系统物理删。
         };
 
         if let (Ok((pane_data, _)), Some(title)) = (&result, custom_vertical_tabs_title.as_deref())
@@ -2838,8 +2833,8 @@ impl PaneGroup {
             shared_session_role_change_modal,
             active_file_model,
             terminal_with_open_summarization_dialog: None,
-            pane_with_open_environment_setup_mode_selector: None,
-            pane_with_open_agent_assisted_environment_modal: None,
+            // OpenWarp Wave 7-3:Cloud Mode UI 子系统中的 pane-level modal 跟踪
+            // 字段随 UI 物理删。
             right_panel_open: false,
             left_panel_open: false,
             is_right_panel_maximized: false,
@@ -4320,13 +4315,8 @@ impl PaneGroup {
             }
 
             // OpenWarp:删除 share_block_modal cleanup(云端 share block)
-
-            if self.pane_with_open_environment_setup_mode_selector == Some(pane_id) {
-                self.pane_with_open_environment_setup_mode_selector = None;
-            }
-            if self.pane_with_open_agent_assisted_environment_modal == Some(pane_id) {
-                self.pane_with_open_agent_assisted_environment_modal = None;
-            }
+            // OpenWarp Wave 7-3:Cloud Mode UI 子系统中的 pane-level modal 跟踪
+            // 字段 cleanup 随 UI 物理删。
 
             self.focus_next_terminal_pane_and_activate_session(
                 pane_id,
@@ -4349,13 +4339,8 @@ impl PaneGroup {
             self.clean_up_pane(pane_id, ctx);
 
             // OpenWarp:删除 share_block_modal cleanup(云端 share block)
-
-            if self.pane_with_open_environment_setup_mode_selector == Some(pane_id) {
-                self.pane_with_open_environment_setup_mode_selector = None;
-            }
-            if self.pane_with_open_agent_assisted_environment_modal == Some(pane_id) {
-                self.pane_with_open_agent_assisted_environment_modal = None;
-            }
+            // OpenWarp Wave 7-3:Cloud Mode UI 子系统中的 pane-level modal 跟踪
+            // 字段 cleanup 随 UI 物理删。
 
             self.focus_next_terminal_pane_and_activate_session(
                 pane_id,
@@ -6739,43 +6724,8 @@ impl View for PaneGroup {
             }
         }
 
-        // Render environment setup mode selector at tab level when open.
-        if let Some(pane_id) = self.pane_with_open_environment_setup_mode_selector {
-            let selector_handle = self
-                .terminal_view_from_pane_id(pane_id, app)
-                .and_then(|tv| {
-                    tv.as_ref(app)
-                        .environment_setup_mode_selector_handle()
-                        .cloned()
-                })
-                .or_else(|| {
-                    self.downcast_pane_by_id::<EnvironmentManagementPane>(pane_id)
-                        .and_then(|emp| {
-                            emp.environments_page_view(app)
-                                .as_ref(app)
-                                .environment_setup_mode_selector_handle()
-                                .cloned()
-                        })
-                });
-            if let Some(handle) = selector_handle {
-                stack.add_child(ChildView::new(&handle).finish());
-            }
-        }
-
-        // Render agent-assisted environment modal at tab level when open.
-        if let Some(pane_id) = self.pane_with_open_agent_assisted_environment_modal {
-            if let Some(handle) = self
-                .downcast_pane_by_id::<EnvironmentManagementPane>(pane_id)
-                .and_then(|emp| {
-                    emp.environments_page_view(app)
-                        .as_ref(app)
-                        .agent_assisted_environment_modal_handle(app)
-                        .cloned()
-                })
-            {
-                stack.add_child(ChildView::new(&handle).finish());
-            }
-        }
+        // OpenWarp Wave 7-3:environment setup mode selector / agent-assisted environment
+        // modal 在 tab 层级的覆盖渲染随 Cloud Mode UI 子系统物理删。
 
         stack.finish()
     }
