@@ -104,6 +104,7 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_ctx| RelaunchModel::new());
     app.add_singleton_model(|ctx| ChangelogModel::new(ServerApiProvider::as_ref(ctx).get()));
     app.add_singleton_model(|_| GitHubAuthNotifier::new());
+    app.add_singleton_model(|_| crate::ssh_manager::SshTreeChangedNotifier::new());
     app.add_singleton_model(|_ctx| SyncedInputState::mock());
     app.add_singleton_model(|_| ResizableData::default());
     app.add_singleton_model(LocalWorkflows::new);
@@ -1580,6 +1581,45 @@ fn test_view_only_session() {
         // Ensure command search doesn't work for read-only shared sessions
         workspace.read(&app, |workspace, _ctx| {
             assert!(!workspace.current_workspace_state.is_command_search_open);
+        });
+    });
+}
+
+#[test]
+fn test_server_token_compatibility_finds_restored_local_conversation() {
+    use crate::ai::agent::conversation::AIConversation;
+
+    App::test((), |mut app| async move {
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let token = ServerConversationToken::new("restored-token".to_string());
+        let conversation_id = history_model.update(&mut app, |model, ctx| {
+            let mut conversation = AIConversation::new(false);
+            conversation.set_server_conversation_token(token.as_str().to_string());
+            let conversation_id = conversation.id();
+            model.restore_conversations(EntityId::new(), vec![conversation], ctx);
+            conversation_id
+        });
+
+        app.read(|ctx| {
+            assert_eq!(
+                Workspace::find_local_conversation_id_by_server_token(&token, ctx),
+                Some(conversation_id),
+            );
+        });
+    });
+}
+
+#[test]
+fn test_server_token_compatibility_ignores_unknown_token() {
+    App::test((), |app| async move {
+        app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let token = ServerConversationToken::new("missing-token".to_string());
+
+        app.read(|ctx| {
+            assert_eq!(
+                Workspace::find_local_conversation_id_by_server_token(&token, ctx),
+                None,
+            );
         });
     });
 }

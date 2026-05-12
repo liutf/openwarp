@@ -3758,18 +3758,24 @@ impl Workspace {
         self.activate_tab_internal(self.tab_count() - 1, ctx);
     }
 
-    /// Opens a cloud conversation by server token.
-    /// If the current user owns or created it, navigate to its open pane or restore it
-    /// into a new tab. Otherwise, open the read-only transcript viewer.
+    /// 兼容旧的 server token 入口:仅打开本地已经恢复过的 conversation。
     pub fn open_cloud_conversation_from_server_token(
         &mut self,
         server_token: ServerConversationToken,
         ctx: &mut ViewContext<Self>,
     ) {
-        let history = BlocklistAIHistoryModel::as_ref(ctx);
-        let Some(conversation_id) = history.find_conversation_id_by_server_token(&server_token)
+        let Some(conversation_id) =
+            Self::find_local_conversation_id_by_server_token(&server_token, ctx)
         else {
-            self.load_cloud_conversation_into_new_transcript_viewer(server_token, ctx);
+            self.show_local_conversation_not_found_toast(ctx);
+            if self.tab_count() == 0 {
+                self.add_tab_with_pane_layout(
+                    Default::default(),
+                    Arc::new(HashMap::new()),
+                    None,
+                    ctx,
+                );
+            }
             return;
         };
 
@@ -3803,16 +3809,17 @@ impl Workspace {
         }
     }
 
-    /// Load the conversation into a transcript viewer in a new tab (with no input/backing shell)
-    pub fn load_cloud_conversation_into_new_transcript_viewer(
-        &mut self,
-        conversation_id: ServerConversationToken,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let _ = conversation_id;
+    fn find_local_conversation_id_by_server_token(
+        server_token: &ServerConversationToken,
+        ctx: &AppContext,
+    ) -> Option<AIConversationId> {
+        BlocklistAIHistoryModel::as_ref(ctx).find_conversation_id_by_server_token(server_token)
+    }
+
+    fn show_local_conversation_not_found_toast(&mut self, ctx: &mut ViewContext<Self>) {
         self.toast_stack.update(ctx, |view, ctx| {
             let new_toast = DismissibleToast::error(
-                "Cloud conversation loading is disabled in OpenWarp.".to_string(),
+                "Conversation is not available in local OpenWarp history.".to_string(),
             );
             view.add_ephemeral_toast(new_toast, ctx);
         });
@@ -20103,10 +20110,7 @@ impl TypedActionView for Workspace {
                         return;
                     }
                 }
-                self.load_cloud_conversation_into_new_transcript_viewer(
-                    conversation_id.clone(),
-                    ctx,
-                );
+                self.open_cloud_conversation_from_server_token(conversation_id.clone(), ctx);
             }
             ForkAIConversation {
                 conversation_id,
