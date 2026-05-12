@@ -7,8 +7,8 @@ use crate::cloud_object::{
         generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
         json_model::{JsonModel, JsonSerializer},
     },
-    GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-    JsonObjectType, ServerCloudObject, UniquePer,
+    GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
+    ServerCloudObject, UniquePer,
 };
 
 use settings::{

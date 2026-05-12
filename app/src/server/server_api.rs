@@ -630,7 +630,6 @@ impl ServerApi {
     // `TranscribeRequest` / `TranscribeResponse` import。`TranscribeError` enum 本身
     // 保留,继续被 `voice/transcriber.rs` 消费。
 
-
     pub async fn generate_multi_agent_output(
         &self,
         _request: &warp_multi_agent_api::Request,

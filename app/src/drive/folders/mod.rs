@@ -6,9 +6,9 @@ use super::CloudObjectTypeAndId;
 use crate::{
     appearance::Appearance,
     cloud_object::{
-        CloudModelType, CreateCloudObjectResult, CreateObjectRequest,
-        GenericCloudObject, GenericServerObject, ObjectType, Revision, SerializedModel,
-        ServerCloudObject, Space, UpdateCloudObjectResult,
+        CloudModelType, CreateCloudObjectResult, CreateObjectRequest, GenericCloudObject,
+        GenericServerObject, ObjectType, Revision, SerializedModel, ServerCloudObject, Space,
+        UpdateCloudObjectResult,
     },
     persistence::ModelEvent,
     server::{

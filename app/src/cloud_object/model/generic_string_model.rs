@@ -3,8 +3,8 @@ use std::{fmt::Debug, sync::Arc};
 use crate::{
     appearance::Appearance,
     cloud_object::{
-        CloudModelType, CloudObject, CreateCloudObjectResult,
-        CreateObjectRequest, GenericCloudObject, GenericServerObject, GenericStringObjectFormat,
+        CloudModelType, CloudObject, CreateCloudObjectResult, CreateObjectRequest,
+        GenericCloudObject, GenericServerObject, GenericStringObjectFormat,
         GenericStringObjectUniqueKey, ObjectType, Revision, SerializedModel, ServerCloudObject,
         UpdateCloudObjectResult,
     },

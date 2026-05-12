@@ -21,8 +21,8 @@ use crate::{
     ai::document::ai_document_model::AIDocumentId,
     appearance::Appearance,
     cloud_object::{
-        CloudModelType, CreateCloudObjectResult, CreateObjectRequest,
-        GenericCloudObject, GenericServerObject, ObjectType, Owner, Revision, ServerCloudObject,
+        CloudModelType, CreateCloudObjectResult, CreateObjectRequest, GenericCloudObject,
+        GenericServerObject, ObjectType, Owner, Revision, ServerCloudObject,
         UpdateCloudObjectResult,
     },
     drive::{

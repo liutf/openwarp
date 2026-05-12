@@ -15,7 +15,7 @@ use crate::{
     settings_view::keybindings::KeybindingChangedNotifier,
     terminal::shared_session::permissions_manager::SessionPermissionsManager,
     test_util::settings::initialize_settings_for_tests,
-    NetworkStatus, TeamTesterStatus, UpdateManager, UserProfiles, UserWorkspaces
+    NetworkStatus, TeamTesterStatus, UpdateManager, UserProfiles, UserWorkspaces,
 };
 
 use super::{Event, OpenOverlay};

@@ -1,4 +1,4 @@
-﻿use repo_metadata::repositories::DetectedRepositories;
+use repo_metadata::repositories::DetectedRepositories;
 #[cfg(feature = "local_fs")]
 use repo_metadata::RepoMetadataModel;
 use warp_core::ui::appearance::Appearance;
@@ -40,9 +40,7 @@ use crate::{
     experiments,
     network::NetworkStatus,
     search::files::model::FileSearchModel,
-    server::{
-        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-    },
+    server::{cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider},
     settings::PrivacySettings,
     settings_view::keybindings::KeybindingChangedNotifier,
     system::SystemInfo,

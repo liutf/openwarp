@@ -16,9 +16,7 @@ use crate::{
     editor::InteractionState,
     network::NetworkStatus,
     notebooks::{editor::keys::NotebookKeybindings, notebook::NotebookView},
-    server::{
-        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-    },
+    server::{cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider},
     settings_view::keybindings::KeybindingChangedNotifier,
     test_util::settings::initialize_settings_for_tests,
     workspace::ActiveSession,

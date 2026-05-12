@@ -4,9 +4,7 @@ use crate::{
     ai::{
         ambient_agents::scheduled::{CloudScheduledAmbientAgentModel, ScheduledAmbientAgent},
         cloud_environments::{AmbientAgentEnvironment, CloudAmbientAgentEnvironmentModel},
-        execution_profiles::{
-            AIExecutionProfile, CloudAIExecutionProfileModel,
-        },
+        execution_profiles::{AIExecutionProfile, CloudAIExecutionProfileModel},
         facts::{AIFact, CloudAIFactModel},
     },
     auth::{AuthManager, AuthStateProvider},

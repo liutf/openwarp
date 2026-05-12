@@ -78,8 +78,6 @@ impl ManagedSecretsClient for ServerApi {
     ) -> Result<TaskIdentityToken> {
         // OpenWarp 无服务端 OIDC issuer,Bedrock/Vertex federated 凭据路径
         // 直接失败;BYOP AWS 用户走 access key / SSO,与本路径无关。
-        Err(anyhow!(
-            "Task identity token issuance disabled in OpenWarp"
-        ))
+        Err(anyhow!("Task identity token issuance disabled in OpenWarp"))
     }
 }

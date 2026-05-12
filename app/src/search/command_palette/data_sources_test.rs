@@ -22,9 +22,7 @@ use crate::{
     network::NetworkStatus,
     notebooks::NotebookId,
     search::data_source::Query,
-    server::{
-        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-    },
+    server::{cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider},
     system::SystemStats,
     workflows::WorkflowId,
     workspaces::{

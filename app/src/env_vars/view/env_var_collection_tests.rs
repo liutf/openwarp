@@ -9,9 +9,7 @@ use crate::{
         view::env_var_collection::EnvVarCollectionView,
     },
     network::NetworkStatus,
-    server::{
-        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-    },
+    server::{cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider},
     settings_view::keybindings::KeybindingChangedNotifier,
     test_util::settings::initialize_settings_for_tests,
     workspace::ActiveSession,
