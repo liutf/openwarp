@@ -3,12 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::Arc;
 
 use futures::FutureExt;
 use itertools::Itertools as _;
 use persistence::model::AgentConversationRecord;
-use warpui::{AppContext, SingletonEntity};
 
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{
@@ -16,8 +14,6 @@ use crate::ai::agent::conversation::{
 };
 use crate::ai::agent::task::Task;
 use crate::persistence::model::{AgentConversation, AgentConversationData};
-use crate::server::server_api::ai::AIClient;
-use crate::server::server_api::ServerApiProvider;
 use crate::terminal::model::block::SerializedBlock;
 
 #[cfg(feature = "local_fs")]
@@ -96,7 +92,6 @@ pub fn convert_persisted_conversation_to_ai_conversation_with_metadata(
 pub async fn load_conversation_from_server(
     _conversation_id: AIConversationId,
     _server_conversation_token: ServerConversationToken,
-    _server_api: Arc<dyn AIClient>,
 ) -> Option<CloudConversationData> {
     None
 }
@@ -130,7 +125,6 @@ impl BlocklistAIHistoryModel {
     pub fn load_conversation_data(
         &self,
         conversation_id: AIConversationId,
-        ctx: &AppContext,
     ) -> warpui::r#async::BoxFuture<'static, Option<CloudConversationData>> {
         // First check if the conversation is already in memory
         if let Some(conversation) = self.conversations_by_id.get(&conversation_id) {
@@ -158,13 +152,7 @@ impl BlocklistAIHistoryModel {
         } else {
             // Load from server asynchronously
             if let Some(server_token) = metadata.server_conversation_token {
-                // Extract the server API before creating the async future
-                let server_api = ServerApiProvider::as_ref(ctx).get_ai_client();
-                box_future(load_conversation_from_server(
-                    conversation_id,
-                    server_token,
-                    server_api,
-                ))
+                box_future(load_conversation_from_server(conversation_id, server_token))
             } else {
                 log::warn!(
                     "Cannot load conversation {conversation_id}: no local data and no server token"

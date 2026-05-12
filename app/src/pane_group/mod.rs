@@ -3178,7 +3178,7 @@ impl PaneGroup {
 
         let future = history_model_handle
             .as_ref(ctx)
-            .load_conversation_data(ai_conversation_id, ctx);
+            .load_conversation_data(ai_conversation_id);
         ctx.spawn(future, move |group, conversation, ctx| {
             if let Some(conversation) = conversation {
                 group.load_data_into_transcript_viewer(target_view, conversation, ctx);

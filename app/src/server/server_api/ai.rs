@@ -734,18 +734,6 @@ pub trait AIClient: 'static + Send + Sync {
         message_id: &str,
     ) -> anyhow::Result<ReadAgentMessageResponse, anyhow::Error>;
 
-    /// Fetch a normalized conversation by conversation ID.
-    async fn get_public_conversation(
-        &self,
-        conversation_id: &str,
-    ) -> anyhow::Result<serde_json::Value, anyhow::Error>;
-
-    /// Fetch a normalized conversation by run ID.
-    async fn get_run_conversation(
-        &self,
-        run_id: &str,
-    ) -> anyhow::Result<serde_json::Value, anyhow::Error>;
-
     /// Generates AI copy for code-review flows: commit messages at dialog-open
     /// time and PR titles / bodies at confirm time. `output_type` in the
     /// request picks which of the three the server returns.
@@ -972,24 +960,6 @@ impl AIClient for ServerApi {
     ) -> anyhow::Result<ReadAgentMessageResponse, anyhow::Error> {
         Err(anyhow!(
             "AI client `read_agent_message` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_public_conversation(
-        &self,
-        _conversation_id: &str,
-    ) -> anyhow::Result<serde_json::Value, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_public_conversation` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_run_conversation(
-        &self,
-        _run_id: &str,
-    ) -> anyhow::Result<serde_json::Value, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_run_conversation` is disabled in OpenWarp"
         ))
     }
 

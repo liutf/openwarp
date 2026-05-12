@@ -1,4 +1,4 @@
-﻿//! Agent SDK entry points for invoking Agent-related functionality from the app.
+//! Agent SDK entry points for invoking Agent-related functionality from the app.
 //! For now this provides a simple runner that echoes the received command.
 
 use std::fmt::Write;
@@ -479,30 +479,7 @@ fn run_task(
 ) -> anyhow::Result<()> {
     match command {
         TaskCommand::List(args) => ambient::list_ambient_agent_tasks(ctx, global_options, args),
-        TaskCommand::Get(args) => {
-            if args.conversation {
-                if !FeatureFlag::ConversationApi.is_enabled() {
-                    return Err(anyhow::anyhow!(
-                        "The --conversation flag is not available in this build"
-                    ));
-                }
-                ambient::get_run_conversation(ctx, args.task_id)
-            } else {
-                ambient::get_ambient_agent_task_status(ctx, global_options, args)
-            }
-        }
-        TaskCommand::Conversation(conv_cmd) => {
-            if !FeatureFlag::ConversationApi.is_enabled() {
-                return Err(anyhow::anyhow!(
-                    "The 'conversation' subcommand is not available in this build"
-                ));
-            }
-            match conv_cmd {
-                warp_cli::task::ConversationCommand::Get(args) => {
-                    ambient::get_conversation(ctx, args.conversation_id)
-                }
-            }
-        }
+        TaskCommand::Get(args) => ambient::get_ambient_agent_task_status(ctx, global_options, args),
         TaskCommand::Message(message_cmd) => {
             if !FeatureFlag::OrchestrationV2.is_enabled() {
                 return Err(anyhow::anyhow!(
@@ -1209,7 +1186,6 @@ fn command_requires_auth(command: &CliCommand) -> bool {
         CliCommand::Run(task_cmd) => match task_cmd {
             TaskCommand::List { .. } => true,
             TaskCommand::Get { .. } => true,
-            TaskCommand::Conversation { .. } => true,
             TaskCommand::Message { .. } => true,
         },
         CliCommand::Model(model_cmd) => match model_cmd {
@@ -1368,14 +1344,7 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
         }
         CliCommand::MCP(MCPCommand::List) => CliTelemetryEvent::MCPList,
         CliCommand::Run(TaskCommand::List(_)) => CliTelemetryEvent::TaskList,
-        CliCommand::Run(TaskCommand::Get(args)) => {
-            if args.conversation {
-                CliTelemetryEvent::RunConversationGet
-            } else {
-                CliTelemetryEvent::TaskGet
-            }
-        }
-        CliCommand::Run(TaskCommand::Conversation(_)) => CliTelemetryEvent::ConversationGet,
+        CliCommand::Run(TaskCommand::Get(_)) => CliTelemetryEvent::TaskGet,
         CliCommand::Run(TaskCommand::Message(message_cmd)) => match message_cmd {
             MessageCommand::Watch(_) => CliTelemetryEvent::RunMessageWatch {
                 harness: resolve_orchestration_harness_label(),

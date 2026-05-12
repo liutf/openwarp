@@ -1188,58 +1188,6 @@ impl super::output::TableFormat for AgentMessageHeader {
     }
 }
 
-/// Get a conversation by conversation ID.
-pub fn get_conversation(ctx: &mut AppContext, conversation_id: String) -> anyhow::Result<()> {
-    let runner = ctx.add_singleton_model(|_ctx| AmbientAgentRunner);
-    runner.update(ctx, |runner, ctx| {
-        runner.get_conversation(conversation_id, ctx)
-    })
-}
-
-/// Get a conversation by run ID.
-pub fn get_run_conversation(ctx: &mut AppContext, run_id: String) -> anyhow::Result<()> {
-    let runner = ctx.add_singleton_model(|_ctx| AmbientAgentRunner);
-    runner.update(ctx, |runner, ctx| runner.get_run_conversation(run_id, ctx))
-}
-
-impl AmbientAgentRunner {
-    fn get_conversation(
-        &self,
-        conversation_id: String,
-        ctx: &mut ModelContext<Self>,
-    ) -> anyhow::Result<()> {
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-
-        let future = async move {
-            let conversation = ai_client.get_public_conversation(&conversation_id).await?;
-            let pretty = serde_json::to_string_pretty(&conversation)?;
-            println!("{pretty}");
-            Ok(())
-        };
-        self.spawn_command(future, ctx);
-
-        Ok(())
-    }
-
-    fn get_run_conversation(
-        &self,
-        run_id: String,
-        ctx: &mut ModelContext<Self>,
-    ) -> anyhow::Result<()> {
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-
-        let future = async move {
-            let conversation = ai_client.get_run_conversation(&run_id).await?;
-            let pretty = serde_json::to_string_pretty(&conversation)?;
-            println!("{pretty}");
-            Ok(())
-        };
-        self.spawn_command(future, ctx);
-
-        Ok(())
-    }
-}
-
 impl warpui::Entity for AmbientAgentRunner {
     type Event = ();
 }

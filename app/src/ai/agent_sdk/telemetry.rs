@@ -42,10 +42,6 @@ pub(super) enum CliTelemetryEvent {
     TaskList,
     /// Executing `warp task get`
     TaskGet,
-    /// Executing `warp run conversation get`
-    ConversationGet,
-    /// Executing `warp run get <id> --conversation`
-    RunConversationGet,
     /// Executing `warp run message watch`
     RunMessageWatch { harness: &'static str },
     /// Executing `warp run message send`
@@ -145,8 +141,6 @@ impl TelemetryEvent for CliTelemetryEvent {
             CliTelemetryEvent::ModelList => None,
             CliTelemetryEvent::TaskList => None,
             CliTelemetryEvent::TaskGet => None,
-            CliTelemetryEvent::ConversationGet => None,
-            CliTelemetryEvent::RunConversationGet => None,
             CliTelemetryEvent::RunMessageWatch { harness } => Some(json!({ "harness": harness })),
             CliTelemetryEvent::RunMessageSend { harness } => Some(json!({ "harness": harness })),
             CliTelemetryEvent::RunMessageList { harness } => Some(json!({ "harness": harness })),
@@ -224,10 +218,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
             CliTelemetryEventDiscriminants::ModelList => "CLI.Execute.Model.List",
             CliTelemetryEventDiscriminants::TaskList => "CLI.Execute.Task.List",
             CliTelemetryEventDiscriminants::TaskGet => "CLI.Execute.Task.Get",
-            CliTelemetryEventDiscriminants::ConversationGet => "CLI.Execute.Conversation.Get",
-            CliTelemetryEventDiscriminants::RunConversationGet => {
-                "CLI.Execute.Run.Conversation.Get"
-            }
             CliTelemetryEventDiscriminants::RunMessageWatch => "CLI.Execute.Run.Message.Watch",
             CliTelemetryEventDiscriminants::RunMessageSend => "CLI.Execute.Run.Message.Send",
             CliTelemetryEventDiscriminants::RunMessageList => "CLI.Execute.Run.Message.List",
@@ -305,12 +295,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
             CliTelemetryEventDiscriminants::ModelList => "Listed models from the Warp CLI",
             CliTelemetryEventDiscriminants::TaskList => "Listed tasks from the Warp CLI",
             CliTelemetryEventDiscriminants::TaskGet => "Got status of task from the Warp CLI",
-            CliTelemetryEventDiscriminants::ConversationGet => {
-                "Got conversation by ID from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::RunConversationGet => {
-                "Got run conversation from the Warp CLI"
-            }
             CliTelemetryEventDiscriminants::RunMessageWatch => {
                 "Watched run messages from the Warp CLI"
             }

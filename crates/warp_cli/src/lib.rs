@@ -326,16 +326,6 @@ impl Args {
             command = command.mut_subcommand("harness-support", |c| c.hide(true));
         }
 
-        // Hide the conversation subcommand and --conversation flag from help text.
-        if !FeatureFlag::ConversationApi.is_enabled() {
-            command = command.mut_subcommand("run", |run_cmd| {
-                run_cmd
-                    .mut_subcommand("conversation", |c| c.hide(true))
-                    .mut_subcommand("get", |get_cmd| {
-                        get_cmd.mut_arg("conversation", |arg| arg.hide(true))
-                    })
-            });
-        }
         // Hide the message subcommand from help text.
         if !FeatureFlag::OrchestrationV2.is_enabled() {
             command = command.mut_subcommand("run", |run_cmd| {
