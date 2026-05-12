@@ -11,14 +11,13 @@ use warp_cli::artifact::UploadArtifactArgs;
 
 use super::common::parse_ambient_task_id;
 use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::conversation::ServerAIConversationMetadata;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::server::server_api::ai::{
     AIClient, CreateFileArtifactUploadRequest, CreateFileArtifactUploadResponse,
     FileArtifactRecord, FileArtifactUploadTargetInfo,
 };
 use crate::server::server_api::presigned_upload::upload_file_to_target;
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::LocalServerApiClient;
 
 const MIME_SNIFF_BYTES: usize = 8 * 1024;
 const OZ_RUN_ID_ENV_VAR: &str = "OZ_RUN_ID";
@@ -91,11 +90,14 @@ impl PreparedUploadArtifact {
 
 pub(crate) struct FileArtifactUploader {
     ai_client: Arc<dyn AIClient>,
-    server_api: Arc<ServerApi>,
+    server_api: Arc<dyn LocalServerApiClient>,
 }
 
 impl FileArtifactUploader {
-    pub(crate) fn new(ai_client: Arc<dyn AIClient>, server_api: Arc<ServerApi>) -> Self {
+    pub(crate) fn new(
+        ai_client: Arc<dyn AIClient>,
+        server_api: Arc<dyn LocalServerApiClient>,
+    ) -> Self {
         Self {
             ai_client,
             server_api,
@@ -255,26 +257,6 @@ fn checked_graphql_size_bytes_for_upload(path: &Path, size_bytes: u64) -> Option
     }
 
     graphql_size_bytes
-}
-
-fn single_conversation_metadata(
-    conversation_id: &str,
-    mut metadata: Vec<ServerAIConversationMetadata>,
-) -> Result<ServerAIConversationMetadata> {
-    match metadata.len() {
-        0 => bail!("Conversation not found"),
-        1 => Ok(metadata.pop().expect("metadata length checked")),
-        _ => bail!("Multiple conversations found for '{conversation_id}'"),
-    }
-}
-
-fn ambient_task_id_from_conversation_metadata(
-    conversation_id: &str,
-    metadata: ServerAIConversationMetadata,
-) -> Result<AmbientAgentTaskId> {
-    metadata.ambient_agent_task_id.ok_or_else(|| {
-        anyhow!("Conversation '{conversation_id}' is not backed by a cloud agent task")
-    })
 }
 
 fn parse_run_id(run_id: &str, error_prefix: &str) -> Result<AmbientAgentTaskId> {

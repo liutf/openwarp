@@ -148,6 +148,9 @@ bash script/setup-merge-drivers.sh
 | 模块 / 路径 | 删除原因 | 处理方式 |
 |---|---|---|
 | `cloud_conversations` 全家桶 | openWarp BYOP 不接 Warp 云 | 上游若新增此目录文件,直接 `git rm` |
+| `app/src/server/cloud_objects/**` | OpenWarp 不接云对象 RTC/初始加载/服务端 fan-in;本地写入入口迁到 `app/src/cloud_object/update_manager.rs` | 上游若恢复此目录,直接 `git rm`;保留 `server/mod.rs` 内兼容转发模块 |
+| `app/src/server/server_api/object.rs` | `ObjectClient` 云对象 RPC 已物理删除,本地对象 create/update 只走 CloudModel/SQLite | 上游若恢复此文件或 `get_cloud_objects_client()`,直接删除并保留本地路径 |
+| `crates/graphql/src/api/queries/get_updated_cloud_objects.rs` / `get_oauth_connect_tx_status.rs` | 云对象更新轮询与 OAuth cloud poll 已删除 | 上游若恢复,直接 `git rm`;BYOP OAuth 只保留本地禁用语义 |
 | AI 回复 footer 点赞/点踩(`render_response_footer` 中的 thumbs up/down) | 移除 telemetry 反馈链路 | 上游若改 output.rs 这段,保留 openWarp 版 |
 | 智能体署名 `AgentAttributionWidget` + `AISettings.agent_attribution_enabled` | 不需要 | 上游若修改,丢弃 |
 | Oz 更新日志 toggle UI | 仅删 UI/action/keybinding,字段保留 | 同上 |

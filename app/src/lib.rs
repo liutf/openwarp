@@ -1,4 +1,4 @@
-﻿// Suppress warnings about rustdoc style.
+// Suppress warnings about rustdoc style.
 #![allow(clippy::doc_lazy_continuation)]
 // 上游 Warp 裁剪后遗留的孤儿代码暂时保留,统一抑制 dead_code 告警。
 #![allow(dead_code)]
@@ -1123,6 +1123,7 @@ fn initialize_app(
     let server_api = server_api_provider.as_ref(ctx).get();
     let ai_client = server_api_provider.as_ref(ctx).get_ai_client();
 
+    // OpenWarp:保留 AuthStateProvider singleton 仅用于遗留调用点读取本地占位用户态。
     ctx.add_singleton_model(|_ctx| AuthStateProvider::new(auth_state.clone()));
 
     ctx.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
@@ -1305,10 +1306,7 @@ fn initialize_app(
     ctx.add_singleton_model(|_| pricing::PricingInfoModel::new());
     ctx.add_singleton_model(|ctx| {
         // Not using the *Provider types isn't ideal, but it's worth it for the ability to move managed secrets to a separate crate.
-        ManagedSecretManager::new(
-            server_api_provider.as_ref(ctx).get_managed_secrets_client(),
-            auth_state.clone(),
-        )
+        ManagedSecretManager::new(server_api_provider.as_ref(ctx).get(), auth_state.clone())
     });
 
     #[cfg(target_os = "macos")]
@@ -1374,14 +1372,8 @@ fn initialize_app(
     let user_is_logged_in = auth_state.is_logged_in();
 
     if user_is_logged_in {
-        // Skip refresh_user for CLI mode — the CLI handles auth refresh in
-        // ensure_auth_state so it can detect invalid credentials before running
-        // a command.
-        if !matches!(launch_mode, LaunchMode::CommandLine { .. }) {
-            AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
-                auth_manager.refresh_user(ctx);
-            });
-        }
+        // OpenWarp 本地 auth facade 在 `AuthState::initialize` 时已把身份快照装载完毕。
+        // 启动阶段不再额外触发一次云端 token refresh / auth refresh。
 
         // Set the first frame callback to record the app's startup time.
         // This is only sent for logged-in users so that new users don't skew performance metrics.
@@ -1677,18 +1669,13 @@ fn initialize_app(
     ctx.add_singleton_model(|_| AudibleBell::new());
 
     // This model has to be registered after the user workspaces model because it relies on it,
-    // and before the UpdateManager models because they rely on the TeamTester model.
+    // and before the local workspace/object update models because they rely on the TeamTester model.
     ctx.add_singleton_model(TeamTesterStatus::new);
 
     ctx.add_singleton_model(|ctx| TeamUpdateManager::new(persistence_writer.sender(), ctx));
 
-    ctx.add_singleton_model(|ctx| {
-        UpdateManager::new(
-            persistence_writer.sender(),
-            server_api_provider.as_ref(ctx).get_cloud_objects_client(),
-            ctx,
-        )
-    });
+    // OpenWarp:UpdateManager 只负责本地 cloud object 的内存/SQLite 同步,不再注入云端 client。
+    ctx.add_singleton_model(|ctx| UpdateManager::new(persistence_writer.sender(), ctx));
 
     let toml_file_path = settings::user_preferences_toml_file_path();
     // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。原同步器负责本地
@@ -1719,7 +1706,7 @@ fn initialize_app(
         )
     });
 
-    // MCPGalleryManager subscribes to UpdateManager so that it can be notified when gallery items are updated.
+    // MCPGalleryManager subscribes to UpdateManager so that it can be notified when gallery items are updated locally.
     // The registration of this singleton must be after UpdateManager is registered.
     ctx.add_singleton_model(MCPGalleryManager::new);
 
@@ -1727,13 +1714,13 @@ fn initialize_app(
     ctx.add_singleton_model(SkillManager::new);
 
     // CloudViewModel subscribes to UpdateManager so that it can be notified when objects are
-    // created on the server.
+    // created or mutated in the local object store.
     ctx.add_singleton_model(CloudViewModel::new);
 
-    // AIDocumentModel subscribes to UpdateManager so that it can be notified when notebooks are created on the server.
+    // AIDocumentModel subscribes to UpdateManager so that it can be notified when notebooks are created locally.
     ctx.add_singleton_model(AIDocumentModel::new);
 
-    // AgentConversationsModel subscribes to UpdateManager for RTC task updates.
+    // AgentConversationsModel subscribes to UpdateManager events that still flow through the local updater.
     ctx.add_singleton_model(AgentConversationsModel::new);
 
     // ByoLlmAuthBannerSessionState tracks dismissal of the BYO LLM auth banner (e.g., AWS Bedrock login).

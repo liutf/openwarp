@@ -2,54 +2,11 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::Utc;
 use tempfile::tempdir;
 use warp_cli::artifact::UploadArtifactArgs;
 
 use super::*;
 use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::conversation::{AIAgentHarness, ServerAIConversationMetadata};
-use crate::cloud_object::{Revision, ServerMetadata, ServerPermissions};
-use crate::persistence::model::ConversationUsageMetadata;
-use crate::server::ids::ServerId;
-
-fn create_mock_server_metadata() -> ServerMetadata {
-    ServerMetadata {
-        uid: ServerId::default(),
-        revision: Revision::now(),
-        metadata_last_updated_ts: Utc::now().into(),
-        trashed_ts: None,
-        folder_id: None,
-        is_welcome_object: false,
-        creator_uid: None,
-        last_editor_uid: None,
-        current_editor_uid: None,
-    }
-}
-
-fn create_conversation_metadata(
-    conversation_id: &str,
-    ambient_task_id: Option<&str>,
-) -> ServerAIConversationMetadata {
-    ServerAIConversationMetadata {
-        title: "Artifact upload".to_string(),
-        working_directory: None,
-        harness: AIAgentHarness::Oz,
-        usage: ConversationUsageMetadata {
-            was_summarized: false,
-            context_window_usage: 0.0,
-            credits_spent: 0.0,
-            credits_spent_for_last_block: None,
-            token_usage: vec![],
-            tool_usage_metadata: Default::default(),
-        },
-        metadata: create_mock_server_metadata(),
-        permissions: ServerPermissions::mock_personal(),
-        ambient_agent_task_id: ambient_task_id.map(|task_id| task_id.parse().unwrap()),
-        server_conversation_token: ServerConversationToken::new(conversation_id.to_string()),
-        artifacts: Vec::new(),
-    }
-}
 
 #[test]
 fn normalize_artifact_filepath_preserves_shape_and_normalizes_separators() {
@@ -96,44 +53,6 @@ fn file_size_and_prefix_for_path_returns_full_contents_when_prefix_exceeds_file(
         file_size_and_prefix_for_path(&path, 32).unwrap(),
         (10, b"0123456789".to_vec())
     );
-}
-
-#[test]
-fn single_conversation_metadata_returns_the_only_metadata_record() {
-    let metadata = single_conversation_metadata(
-        "conversation-123",
-        vec![create_conversation_metadata(
-            "conversation-123",
-            Some("550e8400-e29b-41d4-a716-446655440000"),
-        )],
-    )
-    .unwrap();
-
-    let task_id = ambient_task_id_from_conversation_metadata("conversation-123", metadata).unwrap();
-    assert_eq!(
-        task_id,
-        "550e8400-e29b-41d4-a716-446655440000".parse().unwrap()
-    );
-}
-
-#[test]
-fn single_conversation_metadata_errors_when_no_metadata_is_returned() {
-    let err = single_conversation_metadata("conversation-123", Vec::new()).unwrap_err();
-
-    assert!(err.to_string().contains("Conversation not found"));
-}
-
-#[test]
-fn ambient_task_id_from_conversation_metadata_requires_cloud_task_metadata() {
-    let err = ambient_task_id_from_conversation_metadata(
-        "conversation-123",
-        create_conversation_metadata("conversation-123", None),
-    )
-    .unwrap_err();
-
-    assert!(err
-        .to_string()
-        .contains("Conversation 'conversation-123' is not backed by a cloud agent task"));
 }
 
 #[test]

@@ -102,8 +102,7 @@ fn initialize_app(app: &mut App) -> TestState {
     app.add_singleton_model(voice_input::VoiceInput::new);
 
     let (sender, receiver) = mpsc::sync_channel(10);
-    let objects_client = ServerApiProvider::new_for_test().get_cloud_objects_client();
-    app.add_singleton_model(|ctx| UpdateManager::new(Some(sender), objects_client.clone(), ctx));
+    app.add_singleton_model(|ctx| UpdateManager::new(Some(sender), ctx));
     // OpenWarp(Wave 4):SyncQueue 整删,原 `sync_queue.start_dequeueing(ctx)` 已不适用。
 
     app.add_singleton_model(CloudViewModel::mock);

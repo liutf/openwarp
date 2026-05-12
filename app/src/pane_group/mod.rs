@@ -18,6 +18,8 @@ use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::auth::AuthViewVariant;
+#[cfg(target_family = "wasm")]
+use crate::cloud_object::model::persistence::CloudModel;
 use crate::cloud_object::Space;
 #[cfg(feature = "local_fs")]
 use crate::code::editor_management::CodeSource;
@@ -31,8 +33,6 @@ use crate::pane_group::pane::get_started_pane::GetStartedPane;
 use crate::pane_group::pane::welcome_pane::WelcomePane;
 use crate::pane_group::pane::ActionOrigin;
 use crate::quit_warning::UnsavedStateSummary;
-#[cfg(target_family = "wasm")]
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::settings::{AISettings, DefaultSessionMode, PaneSettings};
 use crate::settings_view::SettingsSection;
 use crate::shell_indicator::ShellIndicatorType;
@@ -6027,7 +6027,7 @@ impl PaneGroup {
         // We need to wait for the app to be loaded before we attempt to get the
         // shareable links. This is because the links come from CloudModel objects
 
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
             if let Some(pane) = me.focused_pane_content(ctx) {
                 match pane.shareable_link(ctx) {

@@ -16,7 +16,7 @@ use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::attachment_utils::MAX_ATTACHMENT_SIZE_BYTES;
 use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::presigned_upload::HttpStatusError;
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::LocalServerApiClient;
 use crate::util::image::MIN_IMAGE_HEADER_SIZE;
 
 /// Maximum number of file attachments for a cloud agent task.
@@ -32,7 +32,7 @@ pub const MAX_ATTACHMENT_COUNT_FOR_CLOUD_QUERY: usize = 25;
 /// Individual download failures are logged but don't cause the entire function to fail.
 pub(crate) async fn fetch_and_download_attachments(
     ai_client: Arc<dyn AIClient>,
-    http_client: Arc<ServerApi>,
+    http_client: Arc<dyn LocalServerApiClient>,
     task_id: String,
     attachments_dir: PathBuf,
 ) -> anyhow::Result<Option<String>> {
@@ -139,7 +139,7 @@ pub(crate) async fn fetch_and_download_handoff_snapshot_attachments(
 async fn download_and_write_attachments(
     attachments: Vec<TaskAttachment>,
     attachment_dir: &Path,
-    http_client: &ServerApi,
+    http_client: &dyn LocalServerApiClient,
 ) -> anyhow::Result<()> {
     fs::create_dir_all(attachment_dir)
         .await

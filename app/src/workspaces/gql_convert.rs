@@ -947,7 +947,7 @@ impl From<PublicUserProfile> for UserProfileWithUID {
 
 // OpenWarp(本地化,Phase 2d-4a-1):原 `TryFrom<WarpDriveUpdate> for ObjectUpdateMessage` 是
 // GraphQL Drive Subscription 拼装到 RTC 消息的转换,随 Listener / ObjectUpdateMessage
-// 一起物理删除。其调用端在 `server_api/object.rs::get_warp_drive_updates`,同一删除。
+// 一起物理删除。其云端订阅调用端已同步删除。
 
 impl TryFrom<warp_graphql::folder::Folder> for ServerFolder {
     type Error = anyhow::Error;

@@ -16,8 +16,8 @@ use crate::ai::ambient_agents::AmbientAgentTaskId;
 
 use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::CloudModel;
 use crate::cloud_object::Owner;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::ServerApiProvider;
 use crate::workspaces::update_manager::TeamUpdateManager;
@@ -68,7 +68,7 @@ pub(super) fn set_ambient_task_context_from_run_id(
     let task_id = parse_ambient_task_id(run_id, "Invalid run ID")?;
     ServerApiProvider::handle(ctx)
         .as_ref(ctx)
-        .get()
+        .get_local_client()
         .set_ambient_agent_task_id(Some(task_id));
     Ok(task_id)
 }
@@ -135,7 +135,7 @@ where
 pub fn refresh_warp_drive(
     ctx: &AppContext,
 ) -> impl Future<Output = anyhow::Result<()>> + Send + 'static {
-    UpdateManager::as_ref(ctx)
+    CloudModel::as_ref(ctx)
         .initial_load_complete()
         .with_timeout(WARP_DRIVE_SYNC_TIMEOUT)
         .map_err(|_| anyhow::anyhow!("Timed out waiting for Warp Drive to sync"))

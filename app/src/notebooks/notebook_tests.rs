@@ -200,9 +200,11 @@ async fn initial_load(app: &mut App, updated_notebooks: impl Into<Vec<ServerNote
         mcp_gallery: Default::default(),
     };
 
-    let load_complete = UpdateManager::handle(app).update(app, |update_manager, ctx| {
+    UpdateManager::handle(app).update(app, |update_manager, ctx| {
         update_manager.mock_initial_load(response, ctx);
-        update_manager.initial_load_complete()
+    });
+    let load_complete = app.read(|ctx| {
+        crate::cloud_object::model::persistence::CloudModel::as_ref(ctx).initial_load_complete()
     });
     load_complete.await
 }

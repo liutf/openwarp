@@ -13,7 +13,7 @@ use crate::ai::artifact_download::{download_artifact_bytes, download_destination
 #[cfg(test)]
 use crate::server::server_api::ai::FileArtifactRecord;
 use crate::server::server_api::ai::{AIClient, ArtifactDownloadResponse};
-use crate::server::server_api::{ServerApi, ServerApiProvider};
+use crate::server::server_api::{LocalServerApiClient, ServerApiProvider};
 
 use super::artifact_upload::{
     CompletedFileArtifactUpload, FileArtifactUploadRequest, FileArtifactUploader,
@@ -81,7 +81,7 @@ impl ArtifactCommandRunner {
         ctx: &mut ModelContext<Self>,
     ) {
         let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-        let server_api = ServerApiProvider::as_ref(ctx).get();
+        let server_api = ServerApiProvider::as_ref(ctx).get_local_client();
 
         ctx.spawn(
             async move { download_artifact(ai_client, server_api, args).await },
@@ -104,7 +104,7 @@ impl ArtifactCommandRunner {
         output_format: OutputFormat,
         ctx: &mut ModelContext<Self>,
     ) {
-        let server_api = ServerApiProvider::as_ref(ctx).get();
+        let server_api = ServerApiProvider::as_ref(ctx).get_local_client();
         let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
         let uploader = FileArtifactUploader::new(ai_client, server_api.clone());
 
@@ -147,7 +147,7 @@ async fn get_artifact(
 
 async fn download_artifact(
     ai_client: Arc<dyn AIClient>,
-    server_api: Arc<ServerApi>,
+    server_api: Arc<dyn LocalServerApiClient>,
     args: DownloadArtifactArgs,
 ) -> Result<DownloadArtifactOutput> {
     let artifact = get_artifact(ai_client, &args.artifact_uid).await?;

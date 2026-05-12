@@ -877,7 +877,9 @@ impl DriveIndex {
 
         let sorting_choice = *WarpDriveSettings::as_ref(ctx).sorting_choice.value();
 
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         ctx.spawn(initial_load_complete, |me, _, ctx| {
             me.initialize_section_states(ctx);
             me.has_initialized_sections.set();

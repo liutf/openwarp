@@ -16,7 +16,7 @@ use crate::server::server_api::ai::{
     ListAgentMessagesRequest, ReadAgentMessageResponse, RunSortBy, RunSortOrder,
     SendAgentMessageRequest, SendAgentMessageResponse, SpawnAgentRequest, TaskListFilter,
 };
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::AgentEventStreamClient;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
     terminal::shared_session, util::time_format::format_approx_duration_from_now_utc,
@@ -667,7 +667,7 @@ impl AmbientAgentRunner {
     ) -> anyhow::Result<()> {
         ensure_stream_output_format(output_format)?;
         let provider = ServerApiProvider::as_ref(ctx);
-        let server_api = provider.get();
+        let server_api = provider.get_agent_event_stream_client();
         let ai_client = provider.get_ai_client();
 
         let future = async move { watch_messages_forever(server_api, ai_client, args).await };
@@ -908,7 +908,7 @@ fn write_stream_record<T: Serialize>(record: &T) -> anyhow::Result<()> {
     Ok(())
 }
 async fn watch_messages_forever(
-    server_api: Arc<ServerApi>,
+    server_api: Arc<dyn AgentEventStreamClient>,
     ai_client: Arc<dyn AIClient>,
     args: MessageWatchArgs,
 ) -> anyhow::Result<()> {

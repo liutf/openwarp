@@ -30,7 +30,6 @@ use onboarding::{
 use crate::auth::UserAuthenticationError;
 use crate::persistence::ModelEvent;
 use crate::report_if_error;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::experiments::is_free_user_no_ai_experiment_active;
 use crate::server::ids::SyncId;
 use crate::server::server_api::ServerApiProvider;
@@ -972,7 +971,7 @@ fn open_team_settings_with_email_invite_in_new_window(
         if let AuthOnboardingState::Terminal(workspace_view_handle) =
             &root_view.auth_onboarding_state
         {
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             let email_invite = arg.invite_email.clone();
             workspace_view_handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
@@ -1008,7 +1007,7 @@ fn open_mcp_settings_in_new_window(args: &OpenMCPSettingsArgs, ctx: &mut AppCont
         if let AuthOnboardingState::Terminal(workspace_view_handle) =
             &root_view.auth_onboarding_state
         {
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             workspace_view_handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
                     workspace.open_mcp_servers_page(
@@ -1029,7 +1028,7 @@ fn open_codex_in_new_window(_: &(), ctx: &mut AppContext) {
         if let AuthOnboardingState::Terminal(workspace_view_handle) =
             &root_view.auth_onboarding_state
         {
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             workspace_view_handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
                     workspace.open_codex_modal(ctx)
@@ -1636,7 +1635,7 @@ pub struct RootView {
     /// Stores the tutorial from onboarding when the user needs to log in before
     /// the guided tour can start. Consumed after auth completes.
     pending_tutorial: Option<OnboardingTutorial>,
-    /// settings to apply after a new user login / initial cloud load completes
+    /// settings to apply after auth / onboarding 状态切换完成
     pending_post_auth_onboarding_settings: Option<SelectedSettings>,
     paste_auth_token_modal: Option<ViewHandle<PasteAuthTokenModalView>>,
 }
@@ -2838,7 +2837,7 @@ impl RootView {
     ) -> bool {
         if let AuthOnboardingState::Terminal(handle) = &self.auth_onboarding_state {
             let autoinstall = args.autoinstall.clone();
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
                     workspace.open_mcp_servers_page(
@@ -2889,12 +2888,12 @@ impl RootView {
         true
     }
 
-    /// Syncs the local "onboarding completed" flag to the server if the user
-    /// finished onboarding pre-login and has since authenticated. Runs on every
-    /// `AuthComplete`, so it also covers users who skipped login during onboarding
-    /// and later signed up through a different entrypoint (e.g. login modal,
-    /// settings, command palette) while already in the `Terminal` state.
-    fn sync_local_onboarding_to_server(auth_state: &AuthState, ctx: &mut AppContext) {
+    /// 如果用户在进入终端前已完成本地 onboarding,则在 auth facade 进入“可用”状态后
+    /// 立刻补齐本地 `is_onboarded` 标记。
+    ///
+    /// 该逻辑在每次 `AuthComplete` 时运行,因此也覆盖“先跳过登录,之后从其它入口进入
+    /// 已认证态”的路径;整个过程只更新本地 auth facade,不做任何服务端同步。
+    fn finalize_local_onboarding_after_auth(auth_state: &AuthState, ctx: &mut AppContext) {
         let is_onboarded = auth_state.is_onboarded().unwrap_or(true);
         let is_anonymous = auth_state.is_user_anonymous().unwrap_or(false);
         let has_completed_local_onboarding = has_completed_local_onboarding(ctx);
@@ -2911,12 +2910,9 @@ impl RootView {
             AuthManagerEvent::AuthComplete => {
                 self.paste_auth_token_modal = None;
 
-                // If onboarding was completed pre-login, sync the server-side flag now
-                // that the user is authenticated. This must happen regardless of the
-                // current `auth_onboarding_state` so we also cover users who skipped
-                // login during onboarding and later signed up from a different
-                // entrypoint (i.e. we're already in the `Terminal` state).
-                Self::sync_local_onboarding_to_server(&auth_state, ctx);
+                // 如果 onboarding 在进入 auth 完成态之前已结束,这里补齐本地
+                // `is_onboarded` 位,避免后续仍按“未完成引导”分支行事。
+                Self::finalize_local_onboarding_after_auth(&auth_state, ctx);
 
                 // If the user needs SSO after auth is complete, no matter what their current state is,
                 // we need to block their access to the rest of the app.
@@ -3395,9 +3391,8 @@ impl WorkspaceArgs {
 impl AuthOnboardingState {
     fn complete_auth_and_create_workspace(&mut self, ctx: &mut ViewContext<RootView>) {
         // Check if we should show onboarding (only for users who are not yet onboarded).
-        // The server-side `is_onboarded` flag is synced separately by
-        // `RootView::sync_local_onboarding_to_server`, which runs on every `AuthComplete`
-        // before we get here.
+        // 本地 `is_onboarded` 标记会在 `AuthComplete` 时由
+        // `RootView::finalize_local_onboarding_after_auth` 补齐。
         let auth_state = AuthStateProvider::as_ref(ctx).get();
         let is_onboarded = auth_state.is_onboarded().unwrap_or(true);
         let is_anonymous = auth_state.is_user_anonymous().unwrap_or(false);

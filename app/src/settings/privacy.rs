@@ -14,7 +14,6 @@ use crate::auth::AuthStateProvider;
 use crate::auth::SyncedUserSettings;
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::report_error;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 // OpenWarp Wave 3-1:`AuthClient` trait + `MockAuthClient` 随 server_api/auth.rs
 // 整件物理删,`SyncedUserSettings` 迁到 `crate::auth`。
 // OpenWarp Wave 3-1:`ServerApiProvider` 不再被本文件使用 ——
@@ -618,9 +617,8 @@ impl PrivacySettings {
     pub fn maybe_sync_with_warp_drive_prefs(&mut self, ctx: &mut ModelContext<Self>) {
         // Wait for cloud objects to load, and, if telemetry & crash reporting are synced to warp drive
         // initialize from the warp drive values.
-        let update_manager = UpdateManager::as_ref(ctx);
         ctx.spawn(
-            update_manager.initial_load_complete(),
+            CloudModel::as_ref(ctx).initial_load_complete(),
             Self::handle_warp_drive_objects_loaded,
         );
     }

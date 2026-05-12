@@ -5,7 +5,8 @@
 //! - `is_logged_in()` / 各 `is_*` 谓词:固定返回本地用户对应的常量。
 //! - `user_id()`:返回基于 `TEST_USER_UID` 的常量 [`UserUid`]。
 //! - `username_for_display` / `display_name`:基于 [`User::test`] 占位元数据。
-//! - 云端 RPC 触发点(`AuthManager::initialize_user_from_auth_payload` 等):no-op。
+//! - 云端 RPC / 鉴权触发点(`AuthManager::initialize_user_from_auth_payload` 等):no-op,
+//!   不再依赖 `ServerApi` / `AuthClient`。
 //!
 //! 167 处 `crate::auth::AuthStateProvider::as_ref(ctx).get()` 调用一行不改即可继续编译,
 //! 运行时永远拿到"已登录、Free Tier 无限额"的本地占位状态。
@@ -23,11 +24,12 @@ use uuid::Uuid;
 use warp_graphql::object_permissions::OwnerType;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-pub use warp_server_client::auth::{TEST_USER_EMAIL, TEST_USER_UID};
+pub const TEST_USER_EMAIL: &str = "test_user@warp.dev";
+pub const TEST_USER_UID: &str = "test_user_uid";
 
 pub mod user_uid {
-    //! 转发到底层 crate,保留旧 import 路径 `crate::auth::user_uid::UserUid`。
-    pub use warp_server_client::auth::user_uid::*;
+    //! 本地定义 `UserUid`,保留旧 import 路径 `crate::auth::user_uid::UserUid`。
+    pub use warp_server_client::auth::UserUid;
 }
 
 pub use user_uid::UserUid;
@@ -440,6 +442,12 @@ impl AuthState {
     /// 返回当前 credentials 的克隆。
     pub fn credentials(&self) -> Option<Credentials> {
         self.credentials.read().clone()
+    }
+
+    /// 将本地 auth 状态恢复到本地占位用户的默认快照，用于 `log_out` 及本地重置路径。
+    pub fn reset_local_defaults(&self) {
+        *self.user.write() = Some(User::test());
+        *self.credentials.write() = Some(Credentials::Test);
     }
 }
 
@@ -871,9 +879,10 @@ pub struct PersistedCurrentUserInformation {
     pub email: String,
 }
 
-/// AuthManager facade。OpenWarp 本地化后所有云端 RPC 入口都成为 no-op,
+/// AuthManager facade。OpenWarp 本地化后所有云端 RPC / 云鉴权入口都成为 no-op,
 /// `AuthManager` 仍作为 singleton 模型挂在 App 中,以保证 `subscribe_to_model` /
-/// `handle(ctx).update(...)` 调用 0 改动。
+/// `handle(ctx).update(...)` 调用 0 改动,同时保留本地身份 / onboarded 标记 /
+/// logout reset 语义。
 pub struct AuthManager {
     auth_state: Arc<AuthState>,
 }
@@ -909,7 +918,10 @@ impl AuthManager {
         log::debug!("AuthManager::resume_interrupted_auth_payload 已 no-op(OpenWarp)");
     }
 
-    /// 触发 token 刷新。本地化:no-op。
+    /// 刷新当前用户态。
+    ///
+    /// 历史上这里会走云端 token 刷新;OpenWarp 本地化后认证状态在启动时已完成
+    /// 本地初始化,不再发任何 `ServerApi` / `AuthClient` 请求。
     pub fn refresh_user(&self, _ctx: &mut ModelContext<Self>) {}
 
     /// 设备授权码流(CLI 启动登录)。本地化:no-op。
@@ -917,9 +929,13 @@ impl AuthManager {
         log::debug!("AuthManager::authorize_device 已 no-op(OpenWarp)");
     }
 
-    /// 主动登出。本地化:no-op。
+    /// 主动登出。
+    ///
+    /// OpenWarp 不再进入“云端已登出”状态,这里仅把本地身份快照恢复成默认占位用户,
+    /// 供设置重置 / 会话清理等调用点复用。
     pub(crate) fn log_out(&mut self, _ctx: &mut ModelContext<Self>) {
-        log::debug!("AuthManager::log_out 已 no-op(OpenWarp)");
+        self.auth_state.reset_local_defaults();
+        log::debug!("AuthManager::log_out 已本地 reset: 已切换为测试占位用户态");
     }
 
     /// 标记需要重新认证。本地化:no-op。
@@ -954,7 +970,7 @@ impl AuthManager {
     ) {
     }
 
-    /// 用户引导走完后置 onboarded 标记。
+    /// 用户引导走完后置本地 onboarded 标记。
     pub fn set_user_onboarded(&mut self, ctx: &mut ModelContext<Self>) {
         self.auth_state.set_is_onboarded(true);
         ctx.emit(AuthManagerEvent::AuthComplete);

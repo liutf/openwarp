@@ -602,9 +602,9 @@ impl EnvVarCollectionView {
         window_id: WindowId,
         ctx: &mut ViewContext<Self>,
     ) {
-        let initial_load_complete = UpdateManager::handle(ctx).update(ctx, |update_manager, _| {
-            update_manager.initial_load_complete()
-        });
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
             let env_var_collection = CloudModel::as_ref(ctx)
                 .get_env_var_collection(&env_var_collection_id)

@@ -20,13 +20,12 @@
 //! 标注语义已本地化**,不动符号名。
 //!
 //! 真正的 "服务端往返" 类型(`ServerCloudObject` enum / `ServerNotebook` /
-//! `ServerFolder` / `try_from_graphql_fields` / `CreateObjectRequest` 等)将在 Phase 5
+//! `ServerFolder` / `try_from_graphql_fields` 等)将在 Phase 5
 //! 与 `app/src/server/cloud_objects/` 一起物理删除,见同文档 Phase 2d-4a-2。
 
 use self::{
     breadcrumbs::ContainingObject,
     model::{
-        actions::ObjectActions,
         generic_string_model::{
             GenericStringModel, GenericStringObjectId, Serializer, StringModel,
         },
@@ -52,12 +51,9 @@ use crate::{
     env_vars::CloudEnvVarCollectionModel,
     notebooks::{CloudNotebookModel, NotebookId},
     persistence::ModelEvent,
-    server::{
-        ids::{
-            ClientId, HashableId, HashedSqliteId, ObjectUid, ServerId, ServerIdAndType, SyncId,
-            ToServerId,
-        },
-        server_api::object::ObjectClient,
+    server::ids::{
+        ClientId, HashableId, HashedSqliteId, ObjectUid, ServerId, ServerIdAndType, SyncId,
+        ToServerId,
     },
     settings::cloud_preferences::CloudPreferenceModel,
     util::time_format::format_approx_duration_from_now_utc,
@@ -68,7 +64,6 @@ use crate::{
     workspaces::{user_profiles::UserProfiles, user_workspaces::UserWorkspaces},
 };
 use anyhow::Result;
-use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use derivative::Derivative;
 use lazy_static::lazy_static;
@@ -81,15 +76,14 @@ use std::{
 };
 use url::Url;
 use warp_core::{channel::Channel, features::FeatureFlag};
-use warp_graphql::{
-    queries::get_updated_cloud_objects::UpdatedObjectInput, scalars::time::ServerTimestamp,
-};
+use warp_graphql::scalars::time::ServerTimestamp;
 use warpui::{AppContext, SingletonEntity};
 
 pub mod breadcrumbs;
 pub mod grab_edit_access_modal;
 pub mod model;
 pub mod toast_message;
+pub mod update_manager;
 
 pub use warp_server_client::cloud_object::*;
 
@@ -214,10 +208,6 @@ pub trait CloudObject: Debug {
 
     // Returns the name of the object.
     fn display_name(&self) -> String;
-
-    /// Returns an optional UpdatedObjectInput to use during initial load, where
-    /// the object's timestamps are sent to the server for comparison
-    fn versions(&self, app: &AppContext) -> Option<UpdatedObjectInput>;
 
     /// Returns whether this model type should render as a warp drive item.
     fn renders_in_warp_drive(&self) -> bool;
@@ -483,8 +473,6 @@ pub trait CloudObject: Debug {
 ///
 /// When building new model types (e.g. for settings or launch configs) we should just
 /// have to implement this trait, and not the entire CloudObject trait.
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
 pub trait CloudModelType: Debug + Clone + Send + Sync {
     /// The associated CloudObject type for this model (e.g. CloudNotebook, CloudWorkflow, etc)
     type CloudObjectType: CloudObject + 'static;
@@ -539,20 +527,6 @@ pub trait CloudModelType: Debug + Clone + Send + Sync {
 
     /// Returns a serialized model.
     fn serialized(&self) -> SerializedModel;
-
-    /// Sends a request to the server to create this model.
-    async fn send_create_request(
-        object_client: Arc<dyn ObjectClient>,
-        request: CreateObjectRequest,
-    ) -> Result<CreateCloudObjectResult>;
-
-    /// Sends a request to the server to update this model.
-    async fn send_update_request(
-        &self,
-        object_client: Arc<dyn ObjectClient>,
-        server_id: ServerId,
-        revision: Option<Revision>,
-    ) -> Result<UpdateCloudObjectResult<GenericServerObject<Self::IdType, Self>>>;
 
     /// Returns whether this model type supports being moved to the given space.
     fn can_move_to_space(&self, _current_space: Space, _new_space: Space) -> bool {
@@ -779,24 +753,6 @@ where
 
     fn display_name(&self) -> String {
         self.model.display_name()
-    }
-
-    fn versions(&self, app: &AppContext) -> Option<UpdatedObjectInput> {
-        match (self.id, self.metadata.revision.as_ref()) {
-            (SyncId::ServerId(id), Some(revision)) => {
-                let actions_ts = ObjectActions::as_ref(app)
-                    .get_latest_processed_at_ts(&self.id.uid())
-                    .map(|t| t.into());
-                Some(UpdatedObjectInput {
-                    uid: id.into(),
-                    revision_ts: revision.timestamp(),
-                    metadata_ts: self.metadata.metadata_last_updated_ts,
-                    permissions_ts: self.permissions.permissions_last_updated_ts,
-                    actions_ts,
-                })
-            }
-            _ => None,
-        }
     }
 
     fn renders_in_warp_drive(&self) -> bool {
@@ -1510,121 +1466,6 @@ pub enum CloudObjectLocation {
     Space(Space),
     Folder(SyncId),
     Trash,
-}
-
-/// Result of attempting to update a cloud object.
-#[derive(Debug)]
-pub enum UpdateCloudObjectResult<T> {
-    /// The update was successful and the object now has the specified revision.
-    Success {
-        revision_and_editor: RevisionAndLastEditor,
-    },
-    /// The update was rejected because the update was not sent from the current revision in
-    /// storage. The object and revision in storage are returned.
-    Rejected { object: T },
-}
-
-/// Helper struct that contains all the info needed to create an object
-/// on the server
-pub struct CreateObjectRequest {
-    pub serialized_model: Option<SerializedModel>,
-    pub title: Option<String>,
-    pub owner: Owner,
-    pub client_id: ClientId,
-    pub initial_folder_id: Option<FolderId>,
-    pub entrypoint: CloudObjectEventEntrypoint,
-}
-
-#[derive(PartialEq, Eq, Debug)]
-pub struct BulkCreateGenericStringObjectsRequest {
-    pub id: ClientId,
-    pub format: GenericStringObjectFormat,
-    pub uniqueness_key: Option<GenericStringObjectUniqueKey>,
-    pub serialized_model: SerializedModel,
-    pub initial_folder_id: Option<FolderId>,
-    pub entrypoint: CloudObjectEventEntrypoint,
-}
-
-/// Helper struct that contains all the info needed to fetch changed
-/// objects from the server
-#[derive(Default)]
-pub struct ObjectsToUpdate {
-    pub notebooks: Vec<UpdatedObjectInput>,
-    pub workflows: Vec<UpdatedObjectInput>,
-    pub folders: Vec<UpdatedObjectInput>,
-    pub generic_string_objects: Vec<UpdatedObjectInput>,
-}
-
-impl Clone for ObjectsToUpdate {
-    fn clone(&self) -> Self {
-        Self {
-            notebooks: self
-                .notebooks
-                .iter()
-                .map(copy_updated_object_input)
-                .collect(),
-            workflows: self
-                .workflows
-                .iter()
-                .map(copy_updated_object_input)
-                .collect(),
-            folders: self.folders.iter().map(copy_updated_object_input).collect(),
-            generic_string_objects: self
-                .generic_string_objects
-                .iter()
-                .map(copy_updated_object_input)
-                .collect(),
-        }
-    }
-}
-
-fn copy_updated_object_input(input: &UpdatedObjectInput) -> UpdatedObjectInput {
-    UpdatedObjectInput {
-        uid: input.uid.clone(),
-        actions_ts: input.actions_ts,
-        metadata_ts: input.metadata_ts,
-        permissions_ts: input.permissions_ts,
-        revision_ts: input.revision_ts,
-    }
-}
-
-/// The data returned by the server when an object is created, generic to any object type.
-#[derive(Debug)]
-pub struct CreatedCloudObject {
-    pub client_id: ClientId,
-    pub revision_and_editor: RevisionAndLastEditor,
-    pub metadata_ts: ServerTimestamp,
-    pub server_id_and_type: ServerIdAndType,
-    pub creator_uid: Option<String>,
-    pub permissions: ServerPermissions,
-}
-
-/// Result of attempting to create a cloud object.
-/// Allow large enum variant because success is the most common by far
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub enum CreateCloudObjectResult {
-    /// The object creation was successful
-    Success {
-        created_cloud_object: CreatedCloudObject,
-    },
-    /// The object creation denied due to an expected user error
-    UserFacingError(String),
-    /// The object creation was rejected because the generic string object had
-    /// already been created by another client.
-    GenericStringObjectUniqueKeyConflict,
-}
-
-/// Result of attempting to bulk create a cloud object.
-#[derive(Debug)]
-pub enum BulkCreateCloudObjectResult {
-    /// The bulk object creation was successful
-    Success {
-        created_cloud_objects: Vec<CreatedCloudObject>,
-    },
-    /// The bulk object creation was rejected because at least one generic string object had
-    /// already been created by another client.
-    GenericStringObjectUniqueKeyConflict,
 }
 
 /// The creation-specific data returned by the server, which is inserted into CloudModel and persisted

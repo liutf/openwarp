@@ -22,7 +22,6 @@ use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::execution_profiles::{CloudAgentComputerUseState, ComputerUsePermission};
 use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ServerId, SyncId};
 use crate::server::server_api::ai::{
     AgentConfigSnapshot, AmbientAgentTaskState, AttachmentInput, SpawnAgentRequest,
@@ -131,7 +130,7 @@ impl AmbientAgentViewModel {
         // Validate the default environment once Warp Drive sync completes.
         // The environment ID may be restored from settings before environments are synced,
         // so we need to validate it once the initial load is complete.
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
         ctx.spawn(initial_load_complete, |me, _, ctx| {
             me.validate_environment_after_initial_load(ctx);
         });

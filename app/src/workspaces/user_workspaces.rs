@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     ai::llms::LLMModelHost,
-    auth::{AuthStateProvider, UserUid},
+    auth::{UserUid, TEST_USER_UID},
     channel::ChannelState,
     cloud_object::{
         model::persistence::CloudModel, CloudObjectEventEntrypoint, ObjectType, Owner, Space,
@@ -554,14 +554,6 @@ impl UserWorkspaces {
     // Returns a Vec of the user's active spaces, based on their
     // team membership. Includes the "Personal Space" by default.
     pub fn all_user_spaces(&self, ctx: &AppContext) -> Vec<Space> {
-        if AuthStateProvider::as_ref(ctx)
-            .get()
-            .is_user_web_anonymous_user()
-            .unwrap_or_default()
-        {
-            return vec![Space::Shared];
-        }
-
         let mut spaces = Vec::new();
         spaces.extend(self.team_spaces().iter());
 
@@ -575,28 +567,19 @@ impl UserWorkspaces {
         spaces
     }
 
-    // OpenWarp(去中心化分支)本地常量 user_uid。
-    // 无 auth 时 personal_drive() 用它构造 Owner,owner_to_space() 也认它为 Personal。
+    // OpenWarp(本地化分支)个人空间 owner 固定绑到本地占位用户。
     // 必须保持稳定,否则重启后旧对象 owner 字段对不上,Personal Space 列表里"看不见"旧数据。
-    fn local_personal_user_uid() -> UserUid {
-        UserUid::new("openwarp")
-    }
-
-    // 当前用于"个人 Drive"的 user_uid:有登录走 auth,无登录走本地常量。
-    fn effective_personal_user_uid(ctx: &AppContext) -> UserUid {
-        AuthStateProvider::as_ref(ctx)
-            .get()
-            .user_id()
-            .unwrap_or_else(Self::local_personal_user_uid)
+    fn effective_personal_user_uid() -> UserUid {
+        UserUid::new(TEST_USER_UID)
     }
 
     // Returns the [`Owner`] for the user's personal drive.
-    // OpenWarp:无 auth 时回退到 local_personal_user_uid(),让 Drive Personal 空间下的
-    // Workflow / EnvVar / Folder / Notebook / Import 等 Create 动作能在本地走通
-    // (只本地 sqlite 持久化,SyncQueue 上行无 auth 自然 no-op)。
+    // OpenWarp:Drive Personal 空间下的 Workflow / EnvVar / Folder / Notebook / Import
+    // 等 Create 动作统一归属本地占位用户(只本地 sqlite 持久化)。
     pub fn personal_drive(&self, ctx: &AppContext) -> Option<Owner> {
+        let _ = ctx;
         Some(Owner::User {
-            user_uid: Self::effective_personal_user_uid(ctx),
+            user_uid: Self::effective_personal_user_uid(),
         })
     }
 
@@ -613,6 +596,7 @@ impl UserWorkspaces {
     // Maps an [`Owner`] into a [`Space`], based on the user's team memberships.
     // This is always possible, as unknown owners imply the shared space.
     pub fn owner_to_space(&self, owner: Owner, ctx: &AppContext) -> Space {
+        let _ = ctx;
         match owner {
             Owner::User { user_uid } => {
                 if !FeatureFlag::SharedWithMe.is_enabled() {
@@ -621,7 +605,7 @@ impl UserWorkspaces {
 
                 // OpenWarp:用 effective_personal_user_uid 比较,确保无 auth 下
                 // 本地 Owner(user_uid="openwarp")也归到 Personal 而非 Shared。
-                if user_uid == Self::effective_personal_user_uid(ctx) {
+                if user_uid == Self::effective_personal_user_uid() {
                     Space::Personal
                 } else {
                     Space::Shared
@@ -1083,11 +1067,11 @@ impl UserWorkspaces {
     }
 
     pub fn generate_upgrade_link(&mut self, team_uid: ServerId, ctx: &mut ModelContext<Self>) {
-        Self::on_generate_upgrade_link(
-            self,
-            Ok(UserWorkspaces::upgrade_link_for_team(team_uid)),
-            ctx,
-        );
+        let _ = team_uid;
+        ctx.emit(UserWorkspacesEvent::GenerateUpgradeLinkRejected(
+            anyhow::anyhow!("OpenWarp 本地版不支持团队升级链接"),
+        ));
+        ctx.notify();
     }
 
     pub fn on_generate_stripe_billing_portal_link(
@@ -1111,11 +1095,12 @@ impl UserWorkspaces {
         team_uid: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
-        // OpenWarp(本地化,Phase 5):本地无 billing,返回 Stripe 空链接。
         let _ = team_uid;
-        ctx.emit(UserWorkspacesEvent::GenerateStripeBillingPortalLink(
-            String::new(),
-        ));
+        ctx.emit(
+            UserWorkspacesEvent::GenerateStripeBillingPortalLinkRejected(anyhow::anyhow!(
+                "OpenWarp 本地版不支持账单门户链接"
+            )),
+        );
         ctx.notify();
     }
 

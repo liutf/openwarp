@@ -1,7 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use chrono::{Duration, Utc};
     use settings::manager::SettingsManager;
     use warpui::{App, SingletonEntity};
@@ -24,8 +22,6 @@ mod tests {
     use crate::workspaces::user_profiles::UserProfiles;
     use crate::workspaces::user_workspaces::UserWorkspaces;
     use crate::NetworkStatus;
-
-    use crate::server::server_api::object::MockObjectClient;
 
     fn mock_server_notebook_with_revision(
         id: i64,
@@ -66,9 +62,7 @@ mod tests {
         app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![], ctx));
         app.add_singleton_model(TeamTesterStatus::new);
         app.add_singleton_model(CloudModel::mock);
-        app.add_singleton_model(|ctx| {
-            UpdateManager::new(None, Arc::new(MockObjectClient::new()), ctx)
-        });
+        app.add_singleton_model(|ctx| UpdateManager::new(None, ctx));
         app.add_singleton_model(|_| UserProfiles::new(Vec::new()));
         app.add_singleton_model(CloudViewModel::new);
         app.add_singleton_model(NotebookManager::mock);

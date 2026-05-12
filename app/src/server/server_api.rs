@@ -9,7 +9,6 @@ pub mod ai;
 pub mod harness_support;
 pub mod integrations;
 pub mod managed_secrets;
-pub mod object;
 pub(crate) mod presigned_upload;
 // OpenWarp(Wave 3-2):`team` / `workspace` 两个 client trait 与 impl 已物理删,
 // 在 app/ 外 0 消费,UserWorkspaces / TeamUpdateManager 已在 Phase 5 本地化为 no-op。
@@ -17,13 +16,9 @@ pub(crate) mod presigned_upload;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::auth::AuthState;
 use crate::server::graphql::default_request_options;
-use ai::AIClient;
-use channel_versions::ChannelVersions;
+use ai::{AIClient, LocalAIClient};
+use channel_versions::{ChannelChangelogs, ChannelVersion, ChannelVersions, VersionInfo};
 use futures::StreamExt;
-use object::ObjectClient;
-use url::Url;
-use warp_core::errors::{register_error, AnyhowErrorExt, ErrorExt};
-use warp_managed_secrets::client::ManagedSecretsClient;
 use warpui::{r#async::BoxFuture, ModelContext};
 
 // OpenWarp Wave 5-3:原 `AMBIENT_WORKLOAD_TOKEN_HEADER` 随 `generate_multi_agent_output` 云端
@@ -39,6 +34,7 @@ use crate::settings_view;
 use crate::ChannelState;
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 use instant::Instant;
 use parking_lot::{Mutex, RwLock};
@@ -46,6 +42,8 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
+use warp_core::errors::{AnyhowErrorExt, ErrorExt};
+use warp_core::register_error;
 use warp_core::telemetry::TelemetryEvent;
 use warpui::Entity;
 use warpui::SingletonEntity;
@@ -388,6 +386,40 @@ pub struct ServerApi {
     eval_user_id: Option<i32>,
 }
 
+/// OpenWarp 仍保留的本地 `ServerApi` 窄接口:
+/// - 复用长生命周期 HTTP client
+/// - 管理 ambient task header 上下文
+///
+/// 这两项被 BYOP/本地 harness 继续使用,但不再向调用方暴露整颗 `ServerApi` 壳。
+pub trait LocalServerApiClient: 'static + Send + Sync {
+    fn set_ambient_agent_task_id(&self, task_id: Option<AmbientAgentTaskId>);
+    fn http_client(&self) -> &http_client::Client;
+}
+
+impl<T> LocalServerApiClient for Arc<T>
+where
+    T: LocalServerApiClient + ?Sized,
+{
+    fn set_ambient_agent_task_id(&self, task_id: Option<AmbientAgentTaskId>) {
+        self.as_ref().set_ambient_agent_task_id(task_id);
+    }
+
+    fn http_client(&self) -> &http_client::Client {
+        self.as_ref().http_client()
+    }
+}
+
+/// OpenWarp 下仍需保留的本地 agent 事件流入口。
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+pub trait AgentEventStreamClient: 'static + Send + Sync {
+    async fn stream_agent_events(
+        &self,
+        run_ids: &[String],
+        since_sequence: i64,
+    ) -> Result<http_client::EventSourceStream>;
+}
+
 impl ServerApi {
     fn new(
         auth_state: Arc<AuthState>,
@@ -714,51 +746,54 @@ impl ServerApi {
         include_changelogs: bool,
         is_daily: bool,
     ) -> Result<ChannelVersions> {
-        let mut url = Url::parse(&ChannelState::server_root_url())
-            .expect("Should not fail to parse server root URL");
-        if is_daily {
-            url.set_path("/client_version/daily");
-        } else {
-            url.set_path("/client_version");
-        }
-        url.query_pairs_mut()
-            .append_pair("include_changelogs", &include_changelogs.to_string());
-
-        if include_changelogs {
-            log::info!("Fetching channel versions and changelogs from Warp server");
-        } else {
-            log::info!("Fetching channel versions (without changelogs) from Warp server");
-        }
-
-        let mut request_builder = self
-            .client
-            .get(url.as_str())
-            .timeout(FETCH_CHANNEL_VERSIONS_TIMEOUT);
-
-        // Authorization for /client_version is optional. Attach authorization header if an access
-        // token is present. First, try to get a valid token. If our cached one is expired, try to
-        // refresh. Failing that, send the expired token.
-        let auth_token = self
-            .get_or_refresh_access_token()
-            .await
-            .ok()
-            .and_then(|token| token.bearer_token())
-            .or_else(|| self.auth_state.get_access_token_ignoring_validity());
-        if let Some(token_str) = auth_token {
-            request_builder = request_builder.bearer_auth(token_str);
-        }
-
-        let response = request_builder.send().await?;
-        let versions: ChannelVersions = response.json().await?;
-        log::info!("Received channel versions from Warp server: {versions}");
+        let _ = is_daily;
+        let version = ChannelState::app_version()
+            .unwrap_or("v0.local.testing.string_00")
+            .to_string();
+        let channel_version = ChannelVersion::new(VersionInfo::new(version));
+        let changelogs = include_changelogs.then(|| ChannelChangelogs {
+            dev: std::collections::HashMap::new(),
+            preview: std::collections::HashMap::new(),
+            stable: std::collections::HashMap::new(),
+        });
+        let versions = ChannelVersions {
+            dev: channel_version.clone(),
+            preview: channel_version.clone(),
+            stable: channel_version,
+            changelogs,
+        };
+        log::info!("OpenWarp 本地版跳过远端 channel versions 请求，返回本地版本快照");
         Ok(versions)
     }
 }
 
-/// A singleton entity that provides access to the global [`ServerApi`] instance,
-/// or any of its implemented trait objects.
+impl LocalServerApiClient for ServerApi {
+    fn set_ambient_agent_task_id(&self, task_id: Option<AmbientAgentTaskId>) {
+        ServerApi::set_ambient_agent_task_id(self, task_id);
+    }
+
+    fn http_client(&self) -> &http_client::Client {
+        ServerApi::http_client(self)
+    }
+}
+
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+impl AgentEventStreamClient for ServerApi {
+    async fn stream_agent_events(
+        &self,
+        run_ids: &[String],
+        since_sequence: i64,
+    ) -> Result<http_client::EventSourceStream> {
+        ServerApi::stream_agent_events(self, run_ids, since_sequence).await
+    }
+}
+
+/// A singleton entity that provides access to the global [`ServerApi`] instance
+/// and the few trait-object facades still retained in OpenWarp.
 pub struct ServerApiProvider {
     server_api: Arc<ServerApi>,
+    ai_client: Arc<dyn AIClient>,
 }
 
 impl ServerApiProvider {
@@ -769,7 +804,12 @@ impl ServerApiProvider {
         ctx: &mut ModelContext<Self>,
     ) -> Self {
         let (event_sender, event_receiver) = async_channel::bounded(10);
-        let server_api = ServerApi::new(auth_state.clone(), event_sender, agent_source);
+        let server_api = Arc::new(ServerApi::new(
+            auth_state.clone(),
+            event_sender,
+            agent_source,
+        ));
+        let ai_client: Arc<dyn AIClient> = Arc::new(LocalAIClient::new());
 
         // OpenWarp Wave 6-1:原 `NeedsReauth` 分支调 `AuthManager::set_needs_reauth(true)`,
         // Wave 6-1 删 `ServerApiEvent::NeedsReauth` variant 后,剩余 variant 全部走
@@ -781,7 +821,8 @@ impl ServerApiProvider {
             |_, _| {},
         );
         Self {
-            server_api: Arc::new(server_api),
+            server_api,
+            ai_client,
         }
     }
 
@@ -803,11 +844,17 @@ impl ServerApiProvider {
     pub fn new_for_test() -> Self {
         Self {
             server_api: Arc::new(ServerApi::new_for_test()),
+            ai_client: Arc::new(LocalAIClient::new()),
         }
     }
 
-    /// Returns a handle to the underlying [`ServerApi`] object.
-    /// Prefer retrieving a specific trait object related to the methods you're calling.
+    /// 返回 BYOP/本地 harness 仍需的最小本地接口:
+    /// ambient task header 上下文 + 共享 HTTP client。
+    pub fn get_local_client(&self) -> Arc<dyn LocalServerApiClient> {
+        self.server_api.clone()
+    }
+
+    /// 兼容仍未迁出的本地 transport 调用点。新增代码应优先使用窄接口。
     pub fn get(&self) -> Arc<ServerApi> {
         self.server_api.clone()
     }
@@ -815,32 +862,19 @@ impl ServerApiProvider {
     // OpenWarp Wave 3-1:`get_auth_client()` 随 `AuthClient` trait 一同物理删,
     // 所有外部原调用方改为本地 stub (返回 `AuthToken::NoAuth` / `Ok(())`)。
     // OpenWarp Wave 6-8:`get_referrals_client()` / `get_block_client()` 随对应
-    // trait 与设置页 UI 一同物理删。
+    // trait 与设置页 UI 一同物理删。C5 再删通用 `get()`:
+    // `agent_sdk` 仅能按用途获取 `ai_client` / `harness_support` / `local_client`
+    // / `agent_event_stream` 四个最小切面。
 
     pub fn get_ai_client(&self) -> Arc<dyn AIClient> {
-        self.server_api.clone()
+        self.ai_client.clone()
     }
 
-    pub fn get_cloud_objects_client(&self) -> Arc<dyn ObjectClient> {
-        self.server_api.clone()
-    }
-
-    pub fn get_integrations_client(&self) -> Arc<dyn integrations::IntegrationsClient> {
-        self.server_api.clone()
-    }
-
-    pub fn get_managed_secrets_client(&self) -> Arc<dyn ManagedSecretsClient> {
-        self.server_api.clone()
-    }
-
-    /// Returns the shared HTTP client. This client is wired into network logging
-    /// and includes standard Warp request headers.
-    pub fn get_http_client(&self) -> Arc<http_client::Client> {
-        self.server_api.client.clone()
-    }
-
-    #[cfg_attr(target_family = "wasm", expect(dead_code))]
     pub fn get_harness_support_client(&self) -> Arc<dyn harness_support::HarnessSupportClient> {
+        self.server_api.clone()
+    }
+
+    pub fn get_agent_event_stream_client(&self) -> Arc<dyn AgentEventStreamClient> {
         self.server_api.clone()
     }
 }

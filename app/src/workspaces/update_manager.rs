@@ -24,6 +24,7 @@ pub enum TeamUpdateManagerEvent {
 }
 
 /// OpenWarp 本地化版本:`TeamUpdateManager` 退化为本地空 model,保留方法签名兼容性。
+/// 本体不再创建 team / 拉取 workspace 元数据 / 触发任何网络请求。
 pub struct TeamUpdateManager {
     model_event_sender: Option<SyncSender<ModelEvent>>,
 }
@@ -58,7 +59,7 @@ impl TeamUpdateManager {
         rx
     }
 
-    /// OpenWarp(本地化):本地无云端 team 创建,no-op。
+    /// OpenWarp(本地化):本地无云端 team 创建，不触发任何外部请求。
     pub fn create_team(
         &mut self,
         team_name: String,

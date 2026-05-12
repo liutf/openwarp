@@ -1,4 +1,4 @@
-﻿use alias_bar::{AliasBar, AliasBarEvent};
+use alias_bar::{AliasBar, AliasBarEvent};
 use argument_editor::{ArgumentEditorRow, DEFAULT_ARGUMENT_PREFIX};
 use env_var_selector::{EnvVarSelector, EnvVarSelectorEvent};
 use itertools::Itertools;
@@ -633,7 +633,9 @@ impl WorkflowView {
         window_id: WindowId,
         ctx: &mut ViewContext<Self>,
     ) {
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         // TODO @ianhodge CLD-2002: it could be nice to have a loading screen here while we wait for the load
         let settings = settings.clone();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {

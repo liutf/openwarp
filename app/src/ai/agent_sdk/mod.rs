@@ -805,7 +805,7 @@ impl AgentDriverRunner {
             .spawn(move |_, ctx| {
                 ServerApiProvider::handle(ctx)
                     .as_ref(ctx)
-                    .get()
+                    .get_local_client()
                     .set_ambient_agent_task_id(None);
             })
             .await?;
@@ -835,7 +835,9 @@ impl AgentDriverRunner {
                         .as_ref(ctx)
                         .get_ai_client()
                         .clone();
-                    let server_api = ServerApiProvider::handle(ctx).as_ref(ctx).get();
+                    let server_api = ServerApiProvider::handle(ctx)
+                        .as_ref(ctx)
+                        .get_local_client();
                     (task_secrets, ai_client, server_api)
                 }
             })
@@ -978,7 +980,7 @@ impl AgentDriverRunner {
             .spawn(move |_, ctx| {
                 ServerApiProvider::handle(ctx)
                     .as_ref(ctx)
-                    .get()
+                    .get_local_client()
                     .set_ambient_agent_task_id(parsed_task_id);
             })
             .await?;
@@ -1026,7 +1028,12 @@ impl AgentDriverRunner {
             }
             HarnessKind::ThirdParty(h) => {
                 let harness_support_client = foreground
-                    .spawn(|_, ctx| ServerApiProvider::as_ref(ctx).get_harness_support_client())
+                    .spawn(|_, ctx| {
+                        let harness_support_client: std::sync::Arc<
+                            dyn crate::server::server_api::harness_support::HarnessSupportClient,
+                        > = ServerApiProvider::as_ref(ctx).get_harness_support_client();
+                        harness_support_client
+                    })
                     .await?;
                 let resume_conversation_id = AIConversationId::try_from(conversation_id.clone())
                     .map_err(|err| AgentDriverError::ConversationLoadFailed(format!("{err:#}")))?;

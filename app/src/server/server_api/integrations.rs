@@ -21,16 +21,18 @@
 use super::ServerApi;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use cynic::QueryBuilder;
 
 #[cfg(test)]
 use mockall::automock;
 
-use crate::server::graphql::{get_request_context, get_user_facing_error_message};
-use warp_graphql::queries::get_oauth_connect_tx_status::{
-    GetOAuthConnectTxStatus, GetOAuthConnectTxStatusInput, GetOAuthConnectTxStatusResult,
-    GetOAuthConnectTxStatusVariables, OauthConnectTxStatus,
-};
+#[derive(Clone, Copy, Debug)]
+pub enum OauthConnectTxStatus {
+    Completed,
+    Expired,
+    Failed,
+    InProgress,
+    Pending,
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub trait IntegrationsClientBounds: Send + Sync {}
@@ -51,8 +53,7 @@ impl<T: 'static> IntegrationsClientBounds for T {}
 pub trait IntegrationsClient: 'static + IntegrationsClientBounds {
     /// Polls the status of an OAuth connect transaction.
     ///
-    /// OpenWarp:BYOP 本地 OAuth provider flow 仍然依赖该轮询,
-    /// 由 `agent_sdk/oauth_flow.rs::poll_oauth_until_terminal` 消费。
+    /// OpenWarp:本地环境该路径已不再发起远端轮询,消费方当前保留签名兼容。
     ///
     /// # Arguments
     /// * `tx_id` - The transaction ID returned from the OAuth start request
@@ -66,27 +67,9 @@ pub trait IntegrationsClient: 'static + IntegrationsClientBounds {
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl IntegrationsClient for ServerApi {
-    async fn poll_oauth_connect_status(&self, tx_id: String) -> Result<OauthConnectTxStatus> {
-        let variables = GetOAuthConnectTxStatusVariables {
-            request_context: get_request_context(),
-            input: GetOAuthConnectTxStatusInput {
-                tx_id: cynic::Id::new(tx_id),
-            },
-        };
-
-        let operation = GetOAuthConnectTxStatus::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.get_oauth_connect_tx_status {
-            GetOAuthConnectTxStatusResult::GetOAuthConnectTxStatusOutput(output) => {
-                Ok(output.status)
-            }
-            GetOAuthConnectTxStatusResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            GetOAuthConnectTxStatusResult::Unknown => {
-                Err(anyhow!("Unknown error while polling OAuth status"))
-            }
-        }
+    async fn poll_oauth_connect_status(&self, _tx_id: String) -> Result<OauthConnectTxStatus> {
+        Err(anyhow!(
+            "OpenWarp local mode has no cloud OAuth connect polling endpoint"
+        ))
     }
 }

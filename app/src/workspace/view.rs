@@ -3687,7 +3687,9 @@ impl Workspace {
             // We open Warp Drive automatically in two cases:
             // * The user is new to Warp, and went through the overall onboarding flow
             // * The user is on the web, so we can't open a terminal session.
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete =
+                crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                    .initial_load_complete();
             ctx.spawn(initial_load_complete, move |me, _, ctx| {
                 // New Warp users can have non-welcome objects if they were directly invited OR if
                 // linked objects were copied over from an anonymous user.

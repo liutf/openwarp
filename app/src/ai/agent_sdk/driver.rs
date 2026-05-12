@@ -55,9 +55,7 @@ use crate::{
         ids::{ServerId, SyncId},
         server_api::{
             ai::AIClient,
-            harness_support::{
-                HarnessSupportClient, ResolvePromptAttachedSkill, ResolvePromptRequest,
-            },
+            harness_support::{ResolvePromptAttachedSkill, ResolvePromptRequest},
             ServerApiProvider,
         },
     },
@@ -1290,7 +1288,14 @@ impl AgentDriver {
         harness: &dyn ThirdPartyHarness,
         foreground: &ModelSpawner<Self>,
     ) -> Result<Arc<dyn harness::HarnessRunner>, AgentDriverError> {
-        let (working_dir, task_id, server_api, terminal_driver) = foreground
+        let (
+            working_dir,
+            task_id,
+            ai_client,
+            harness_support_client,
+            agent_event_stream_client,
+            terminal_driver,
+        ) = foreground
             .spawn(|me, ctx| {
                 if me.harness.is_some() {
                     log::error!(
@@ -1302,7 +1307,9 @@ impl AgentDriver {
                 Ok((
                     me.working_dir.clone(),
                     me.task_id,
-                    ServerApiProvider::as_ref(ctx).get(),
+                    ServerApiProvider::as_ref(ctx).get_ai_client(),
+                    ServerApiProvider::as_ref(ctx).get_harness_support_client(),
+                    ServerApiProvider::as_ref(ctx).get_agent_event_stream_client(),
                     me.terminal_driver.clone(),
                 ))
             })
@@ -1331,7 +1338,7 @@ impl AgentDriver {
                     skill,
                     attachments_dir: attachments_dir.clone(),
                 };
-                let resolved = server_api
+                let resolved = harness_support_client
                     .resolve_prompt(request)
                     .await
                     .map_err(AgentDriverError::PromptResolutionFailed)?;
@@ -1366,7 +1373,9 @@ impl AgentDriver {
                 resumption_prompt.as_deref(),
                 &working_dir,
                 task_id,
-                server_api,
+                harness_support_client,
+                ai_client,
+                agent_event_stream_client,
                 terminal_driver,
                 resume,
             )?
@@ -1937,7 +1946,9 @@ impl AgentDriver {
 
         let Ok((working_dir, client)) = spawner
             .spawn(|me, ctx| {
-                let client = ServerApiProvider::as_ref(ctx).get_harness_support_client();
+                let client: std::sync::Arc<
+                    dyn crate::server::server_api::harness_support::HarnessSupportClient,
+                > = ServerApiProvider::as_ref(ctx).get_harness_support_client();
                 (me.working_dir.clone(), client)
             })
             .await

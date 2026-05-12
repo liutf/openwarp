@@ -2,7 +2,7 @@ pub mod generate_commands;
 pub mod generate_metadata_for_command;
 // OpenWarp Wave1-2:`give_up_notebook_edit_access` / `grab_notebook_edit_access` /
 // `leave_object` / `record_object_action` / `remove_object_guest` 5 个 mutation
-// 唯一消费方 (ObjectClient impl) 已本地 stub 为 Err,文件一并物理删除。
+// 已随云对象 RPC client 下线,文件一并物理删除。
 //
 // OpenWarp Wave 2-1:再删 21 个 cloud-object mutation —
 // `add_object_guests` / `bulk_create_objects` / `create_folder` / `create_generic_string_object`
@@ -11,8 +11,7 @@ pub mod generate_metadata_for_command;
 // / `transfer_generic_string_object_owner` / `transfer_notebook_owner` / `transfer_workflow_owner`
 // / `trash_object` / `untrash_object` / `update_folder` / `update_generic_string_object`
 // / `update_notebook` / `update_object_guests` / `update_workflow` —
-// 唯一消费方 `ObjectClient impl for ServerApi` 已 100% 本地化(合成 ServerXxx
-// 或 no-op Ok),不再调任何 GraphQL 路径。
+// 云对象 RPC client 已物理删除,不再调任何 GraphQL 路径。
 //
 // OpenWarp Wave 2-2:再删 5 个 AI mutation —
 // `confirm_file_artifact_upload` / `create_file_artifact_upload_target`

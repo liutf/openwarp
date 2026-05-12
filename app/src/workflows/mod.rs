@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 use warp_core::context_flag::ContextFlag;
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, SingletonEntity};
 
 pub mod categories;
-use anyhow::Result;
 use workflow::Workflow;
 
 pub mod aliases;
@@ -21,10 +18,7 @@ pub mod workflow_view;
 
 use crate::appearance::Appearance;
 use crate::cloud_object::model::view::CloudViewModel;
-use crate::cloud_object::{
-    CloudModelType, CreateCloudObjectResult, CreateObjectRequest, GenericCloudObject,
-    GenericServerObject, ObjectType, Revision, ServerCloudObject, UpdateCloudObjectResult,
-};
+use crate::cloud_object::{CloudModelType, GenericCloudObject, ObjectType, ServerCloudObject};
 
 use crate::cloud_object::SerializedModel;
 use crate::drive::items::workflow::WarpDriveWorkflow;
@@ -33,8 +27,6 @@ use crate::drive::CloudObjectTypeAndId;
 use crate::notebooks::{NotebookId, NotebookLocation};
 use crate::persistence::ModelEvent;
 use crate::server::ids::{ServerId, SyncId};
-use crate::server::server_api::object::ObjectClient;
-use async_trait::async_trait;
 pub use categories::{CategoriesView, CategoriesViewEvent, WorkflowsViewAction};
 
 pub fn init(app: &mut AppContext) {
@@ -227,8 +219,6 @@ impl CloudWorkflowModel {
 /// `CloudWorkflow` is a workflow retrieved from the server.
 pub type CloudWorkflow = GenericCloudObject<WorkflowId, CloudWorkflowModel>;
 
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl CloudModelType for CloudWorkflowModel {
     type CloudObjectType = CloudWorkflow;
     type IdType = WorkflowId;
@@ -284,28 +274,6 @@ impl CloudModelType for CloudWorkflowModel {
             });
         }
         None
-    }
-
-    async fn send_create_request(
-        object_client: Arc<dyn ObjectClient>,
-        request: CreateObjectRequest,
-    ) -> Result<CreateCloudObjectResult> {
-        object_client.create_workflow(request).await
-    }
-
-    async fn send_update_request(
-        &self,
-        object_client: Arc<dyn ObjectClient>,
-        server_id: ServerId,
-        revision: Option<Revision>,
-    ) -> Result<UpdateCloudObjectResult<GenericServerObject<WorkflowId, Self>>> {
-        object_client
-            .update_workflow(
-                server_id.into(),
-                serde_json::to_string(&self.data)?.into(),
-                revision,
-            )
-            .await
     }
 
     fn renders_in_warp_drive(&self) -> bool {
