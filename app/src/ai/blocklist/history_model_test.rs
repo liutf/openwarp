@@ -436,7 +436,6 @@ fn test_ambient_agent_conversations_excluded_from_list_but_accessible_by_id() {
                     regular_server_metadata.server_conversation_token.clone(),
                 ),
                 has_local_data: false,
-                has_cloud_data: true,
                 artifacts: Vec::new(),
                 server_conversation_metadata: Some(regular_server_metadata),
             };
@@ -465,7 +464,6 @@ fn test_ambient_agent_conversations_excluded_from_list_but_accessible_by_id() {
                     ambient_server_metadata.server_conversation_token.clone(),
                 ),
                 has_local_data: false,
-                has_cloud_data: true,
                 artifacts: Vec::new(),
                 server_conversation_metadata: Some(ambient_server_metadata),
             };

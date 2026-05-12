@@ -327,8 +327,6 @@ impl BlocklistAIHistoryModel {
                     last_modified_at: agent_conv.conversation.last_modified_at,
                     initial_working_directory,
                     credits_spent,
-                    // If we have a server token, the conversation was synced to cloud
-                    has_cloud_data: server_conversation_token.is_some(),
                     server_conversation_token,
                     has_local_data: true,
                     artifacts,

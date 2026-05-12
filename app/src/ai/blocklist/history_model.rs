@@ -59,9 +59,7 @@ pub use conversation_loader::{
 
 pub(super) const MAX_HISTORICAL_CONVERSATIONS: usize = 100;
 
-/// Metadata for conversations
-/// When created from local DB, has_local_data=true and server_metadata=None.
-/// When fetched from server, has_local_data=false and server_metadata=Some(...).
+/// Metadata for conversations restored from memory or local SQLite.
 #[derive(Debug, Clone)]
 pub struct AIConversationMetadata {
     pub id: AIConversationId,
@@ -82,10 +80,6 @@ pub struct AIConversationMetadata {
     /// false = must be fetched from server
     /// true = exists in local DB and can be fetched from there, even if it also exists in server
     pub has_local_data: bool,
-
-    /// Whether this conversation exists in the cloud (has been synced).
-    /// This is used to determine if the conversation can be shared.
-    pub has_cloud_data: bool,
 
     /// Artifacts (plans, PRs) created during this conversation.
     pub artifacts: Vec<Artifact>,
@@ -114,7 +108,6 @@ impl From<&AIConversation> for AIConversationMetadata {
             credits_spent: Some(conversation.credits_spent()),
             server_conversation_token: conversation.server_conversation_token().cloned(),
             has_local_data: true,
-            has_cloud_data: conversation.server_metadata().is_some(),
             artifacts: conversation.artifacts().to_vec(),
             server_conversation_metadata: conversation.server_metadata().cloned(),
         }
