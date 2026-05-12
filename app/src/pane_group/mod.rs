@@ -1745,9 +1745,8 @@ impl PaneGroup {
             }
             LeafContents::AmbientAgent(snapshot) => {
                 let task_data = snapshot.task_id.map(|task_id| {
-                    let task = AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
-                        model.get_or_async_fetch_task_data(&task_id, ctx)
-                    });
+                    let task = AgentConversationsModel::handle(ctx)
+                        .update(ctx, |model, _| model.get_or_async_fetch_task_data(&task_id));
                     (task_id, task)
                 });
 
@@ -3030,8 +3029,8 @@ impl PaneGroup {
         ctx: &mut ViewContext<Self>,
     ) {
         for (task_id, _) in &pending {
-            AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
-                model.get_or_async_fetch_task_data(task_id, ctx);
+            AgentConversationsModel::handle(ctx).update(ctx, |model, _| {
+                model.get_or_async_fetch_task_data(task_id);
             });
         }
 

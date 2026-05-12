@@ -34,7 +34,6 @@ use crate::ai::ambient_agents::telemetry::{CloudAgentTelemetryEvent, CloudModeEn
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::agent_view::agent_input_footer::editor::AgentToolbarEditorMode;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::history_model::load_conversation_from_server;
 use crate::ai::blocklist::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
 use crate::ai::blocklist::suggested_rule_modal::{
     SuggestedRuleAndId, SuggestedRuleModal, SuggestedRuleModalEvent,
@@ -3774,27 +3773,6 @@ impl Workspace {
             return;
         };
 
-        // Check whether the conversation was started/is owned by by the current user.
-        let user_id = AuthStateProvider::as_ref(ctx).get().user_id();
-        let server_metadata = history.get_server_conversation_metadata(&conversation_id);
-        let conversation_is_owned_by_current_user = match (user_id, server_metadata) {
-            (Some(user_uid), Some(metadata)) => {
-                let is_creator =
-                    metadata.metadata.creator_uid.as_deref() == Some(&*user_uid.to_string());
-                let is_owner = matches!(
-                    metadata.permissions.space,
-                    Owner::User { user_uid: ref owner } if *owner == user_uid
-                );
-                is_creator || is_owner
-            }
-            _ => false,
-        };
-
-        if !conversation_is_owned_by_current_user {
-            self.load_cloud_conversation_into_new_transcript_viewer(server_token, ctx);
-            return;
-        }
-
         // If the conversation is open in a pane this session, grab its nav data so we can
         // navigate directly to it. Otherwise we'll restore from scratch into a new tab.
         let nav_data = AgentConversationsModel::as_ref(ctx)
@@ -3831,80 +3809,13 @@ impl Workspace {
         conversation_id: ServerConversationToken,
         ctx: &mut ViewContext<Self>,
     ) {
-        // Create the tab immediately with a loading state
-        let new_pane_group = ctx.add_typed_action_view(|ctx| {
-            PaneGroup::new_for_conversation_transcript_viewer_loading(
-                self.tips_completed.clone(),
-                self.user_default_shell_unsupported_banner_model_handle
-                    .clone(),
-                self.server_api.clone(),
-                self.model_event_sender.clone(),
-                ctx,
-            )
+        let _ = conversation_id;
+        self.toast_stack.update(ctx, |view, ctx| {
+            let new_toast = DismissibleToast::error(
+                "Cloud conversation loading is disabled in OpenWarp.".to_string(),
+            );
+            view.add_ephemeral_toast(new_toast, ctx);
         });
-
-        ctx.subscribe_to_view(&new_pane_group, move |me, pane_group, event, ctx| {
-            me.handle_file_tree_event(pane_group, event, ctx)
-        });
-
-        self.tabs.push(TabData::new(new_pane_group.clone()));
-        let new_tab_index = self.tab_count() - 1;
-        self.activate_tab_internal(new_tab_index, ctx);
-
-        let server_token = conversation_id;
-
-        ctx.spawn(
-            async move {
-                load_conversation_from_server(AIConversationId::default(), server_token).await
-            },
-            move |me, cloud_conversation, ctx| {
-                let Some(cloud_conversation) = cloud_conversation else {
-                    log::error!("Failed to load conversation from server");
-                    me.toast_stack.update(ctx, |view, ctx| {
-                        let new_toast = DismissibleToast::error(
-                            "Failed to load conversation data.".to_string(),
-                        );
-                        view.add_ephemeral_toast(new_toast, ctx);
-                    });
-                    return;
-                };
-
-                // Update the pane group with the loaded conversation
-                new_pane_group.update(ctx, |pane_group, ctx| {
-                    pane_group
-                        .load_data_into_conversation_transcript_viewer(cloud_conversation, ctx);
-                });
-
-                // Open the transcript details panel by default on WASM (unless on mobile)
-                #[cfg(target_family = "wasm")]
-                {
-                    if !warpui::platform::wasm::is_mobile_device() {
-                        me.current_workspace_state.is_transcript_details_panel_open = true;
-                        me.transcript_info_button.update(ctx, |button, ctx| {
-                            button.set_active(true, ctx);
-                        });
-                    }
-                    me.update_transcript_details_panel_data(ctx);
-                }
-
-                // Refresh the focused conversation state.
-                if me.active_tab_pane_group().id() == new_pane_group.id() {
-                    let focused_terminal_view_id = me
-                        .active_tab_pane_group()
-                        .as_ref(ctx)
-                        .active_session_view(ctx)
-                        .map(|view| view.id());
-                    let ambient_agent_task_id = me
-                        .get_active_session_terminal_model(ctx)
-                        .and_then(|model| model.lock().ambient_agent_task_id());
-                    me.notify_terminal_focus_change(
-                        focused_terminal_view_id,
-                        ambient_agent_task_id,
-                        ctx,
-                    );
-                }
-            },
-        );
     }
 
     fn open_share_session_modal(&mut self, index: usize, ctx: &mut ViewContext<Self>) {

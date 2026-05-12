@@ -8,59 +8,22 @@ use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::conversation_navigation::ConversationNavigationData;
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::server::ids::{ServerId, SyncId};
-use crate::server::retry_strategies::{
-    is_transient_http_error, OUT_OF_BAND_REQUEST_RETRY_STRATEGY,
-};
-use crate::server::server_api::ServerApiProvider;
 use crate::ui_components::icons::Icon;
 use crate::workspace::{RestoreConversationLayout, WorkspaceAction};
 use crate::workspaces::user_profiles::UserProfiles;
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
-use instant::Instant;
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use session_sharing_protocol::common::SessionId;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 use warp_cli::agent::Harness;
 use warp_core::features::FeatureFlag;
-use warp_core::report_error;
 use warp_core::ui::theme::{color::internal_colors, WarpTheme};
 use warpui::color::ColorU;
-use warpui::{AppContext, Entity, EntityId, ModelContext, RequestState, SingletonEntity, WindowId};
+use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, WindowId};
 
 const SESSION_EXPIRATION_TIME: chrono::Duration = chrono::Duration::weeks(1);
-
-/// How long to skip refetching a task that just failed with a transient error
-/// (5xx / 408 / 429 / network). Short cooldown — `spawn_with_retry_on_error_when` already
-/// runs fast exponential retries before bubbling up the failure, so this is just enough to
-/// absorb streaming-driven re-entries from `update_transcript_details_panel_data`.
-const TRANSIENT_FETCH_FAILURE_COOLDOWN: Duration = Duration::from_secs(2);
-
-/// How long to skip refetching a task that just failed with a permanent (non-transient) HTTP
-/// error such as 401/403/404. We don't refuse forever — permissions can change mid-session
-/// (e.g. an ACL grant) — but we wait long enough that streaming bursts and rapid re-entries
-/// can't cause a flood.
-const PERMANENT_FETCH_FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
-
-/// Per-task fetch state for `get_or_async_fetch_task_data`. The three variants are mutually
-/// exclusive: a task id is either being fetched right now, in a short cooldown after a
-/// transient failure, or in a longer cooldown after a permanent (non-transient) failure.
-#[derive(Debug)]
-enum TaskFetchState {
-    /// A retry chain is currently outstanding for this task id. Used to dedupe re-entries
-    /// (e.g. from streaming-driven panel refreshes) so we don't spawn overlapping retry
-    /// chains for the same task id.
-    InFlight,
-    /// The fetch returned a permanent (non-transient) HTTP error such as 401/403/404; remember
-    /// when it failed so we can back off for [`PERMANENT_FETCH_FAILURE_COOLDOWN`] before
-    /// retrying. We don't refuse forever in case permissions change mid-session.
-    PermanentlyFailedAt(Instant),
-    /// The retry chain just exhausted on a transient error; remember when it failed so we
-    /// can back off for [`TRANSIENT_FETCH_FAILURE_COOLDOWN`] before retrying.
-    TransientlyFailedAt(Instant),
-}
 
 /// Protected eviction: we'll always keep at least 200 personal tasks in the model.
 /// This is so that whenever we evict stale tasks, we do not evict relevant, recent personal tasks
@@ -812,10 +775,6 @@ pub struct AgentConversationsModel {
     /// These will appear in the conversation list even if their source is not user-initiated
     /// (and even after they have been closed).
     manually_opened_task_ids: HashSet<AmbientAgentTaskId>,
-    /// Per-task fetch state for `get_or_async_fetch_task_data`. See [`TaskFetchState`] for
-    /// the meaning of each variant. Tasks that have been successfully fetched live in `tasks`
-    /// and are absent from this map.
-    task_fetch_state: HashMap<AmbientAgentTaskId, TaskFetchState>,
 }
 
 pub enum AgentConversationsModelEvent {
@@ -853,7 +812,6 @@ impl AgentConversationsModel {
             active_data_consumers_per_window: HashMap::new(),
             has_finished_initial_load: true,
             manually_opened_task_ids: HashSet::new(),
-            task_fetch_state: HashMap::new(),
         }
     }
 
@@ -1129,101 +1087,15 @@ impl AgentConversationsModel {
         self.tasks.get(task_id).cloned()
     }
 
-    /// Get raw task data by task ID, fetching from server if not in memory.
-    /// If the task is already in memory, returns it immediately.
-    /// If not, spawns an async task to fetch it from the server, stores it in memory,
-    /// and emits a TasksUpdated event when ready.
+    /// 按 task ID 读取本地已缓存的 task 数据。
     ///
-    /// Multiple unrelated callers (the WASM transcript details panel, the cloud-mode details
-    /// panel, and pane-group restoration) can all hit this method, sometimes many times per
-    /// second while an agent is streaming. To avoid spamming `GET /api/v1/agent/runs/{id}` we:
-    /// * dedupe in-flight fetches per task id,
-    /// * back off for [`TRANSIENT_FETCH_FAILURE_COOLDOWN`] after a transient retry chain
-    ///   exhausts (5xx/408/429/network), and
-    /// * back off for [`PERMANENT_FETCH_FAILURE_COOLDOWN`] after a non-transient failure
-    ///   (e.g. 401/403/404). Permanent failures still get retried periodically so we recover
-    ///   if permissions change mid-session.
+    /// OpenWarp 不再向云端补取 ambient agent task。调用方如果恢复了旧布局但本地模型没有
+    /// 对应 task,这里返回 `None`,由现有面板降级路径处理。
     pub fn get_or_async_fetch_task_data(
-        &mut self,
+        &self,
         task_id: &AmbientAgentTaskId,
-        ctx: &mut ModelContext<Self>,
     ) -> Option<AmbientAgentTask> {
-        // If we already have it, return it
-        if let Some(task) = self.tasks.get(task_id) {
-            return Some(task.clone());
-        }
-
-        // Consult the per-task fetch state. The three variants are mutually exclusive: at most
-        // one applies to a given id.
-        match self.task_fetch_state.get(task_id) {
-            Some(TaskFetchState::InFlight) => return None,
-            Some(TaskFetchState::PermanentlyFailedAt(failed_at)) => {
-                if failed_at.elapsed() < PERMANENT_FETCH_FAILURE_COOLDOWN {
-                    return None;
-                }
-                // Cooldown has elapsed; clear the entry and fall through to fetch again.
-                self.task_fetch_state.remove(task_id);
-            }
-            Some(TaskFetchState::TransientlyFailedAt(failed_at)) => {
-                if failed_at.elapsed() < TRANSIENT_FETCH_FAILURE_COOLDOWN {
-                    return None;
-                }
-                self.task_fetch_state.remove(task_id);
-            }
-            None => {}
-        }
-
-        // Opportunistically purge other expired entries so the map doesn't grow unbounded.
-        self.task_fetch_state.retain(|_, state| match state {
-            TaskFetchState::TransientlyFailedAt(failed_at) => {
-                failed_at.elapsed() < TRANSIENT_FETCH_FAILURE_COOLDOWN
-            }
-            TaskFetchState::PermanentlyFailedAt(failed_at) => {
-                failed_at.elapsed() < PERMANENT_FETCH_FAILURE_COOLDOWN
-            }
-            TaskFetchState::InFlight => true,
-        });
-
-        // Otherwise, spawn a task to fetch it. Use the `_when` variant so non-transient errors
-        // (e.g. 401/403/404) bail after the first attempt instead of issuing all 4 requests in
-        // the retry chain before being cached.
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-        let task_id_clone = *task_id;
-
-        self.task_fetch_state
-            .insert(task_id_clone, TaskFetchState::InFlight);
-
-        ctx.spawn_with_retry_on_error_when(
-            move || {
-                let ai_client = ai_client.clone();
-                async move { ai_client.get_ambient_agent_task(&task_id_clone).await }
-            },
-            OUT_OF_BAND_REQUEST_RETRY_STRATEGY,
-            is_transient_http_error,
-            move |model, result, ctx| match result {
-                RequestState::RequestSucceeded(task) => {
-                    let fetched_id = task.task_id;
-                    model.tasks.insert(fetched_id, task);
-                    model.task_fetch_state.remove(&fetched_id);
-                    ctx.emit(AgentConversationsModelEvent::TasksUpdated);
-                }
-                RequestState::RequestFailed(e) => {
-                    let now = Instant::now();
-                    let new_state = if is_transient_http_error(&e) {
-                        TaskFetchState::TransientlyFailedAt(now)
-                    } else {
-                        TaskFetchState::PermanentlyFailedAt(now)
-                    };
-                    model.task_fetch_state.insert(task_id_clone, new_state);
-                    report_error!(e);
-                }
-                RequestState::RequestFailedRetryPending(_) => {
-                    // Wait for a terminal outcome before updating dedup/backoff state.
-                }
-            },
-        );
-
-        None
+        self.tasks.get(task_id).cloned()
     }
 
     /// Get a conversation by its AIConversationId
@@ -1351,7 +1223,6 @@ impl AgentConversationsModel {
         self.conversations.clear();
         self.active_data_consumers_per_window.clear();
         self.manually_opened_task_ids.clear();
-        self.task_fetch_state.clear();
         // Reset the initial load flag so that we can retry the initial sync with the new logged in user
         self.has_finished_initial_load = false;
     }
