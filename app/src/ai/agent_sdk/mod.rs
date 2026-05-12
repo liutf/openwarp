@@ -1039,8 +1039,9 @@ fn command_requires_auth(command: &CliCommand) -> bool {
         CliCommand::Federate(_) => true,
         CliCommand::HarnessSupport(_) => true,
         CliCommand::Artifact(artifact_cmd) => match artifact_cmd {
-            ArtifactCommand::Upload(_) => false,
-            ArtifactCommand::Get(_) | ArtifactCommand::Download(_) => true,
+            ArtifactCommand::Upload(_) | ArtifactCommand::Get(_) | ArtifactCommand::Download(_) => {
+                false
+            }
         },
     }
 }

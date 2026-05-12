@@ -14,8 +14,8 @@ fn login_does_not_require_auth() {
 }
 
 #[test]
-fn artifact_download_requires_auth() {
-    assert!(command_requires_auth(&CliCommand::Artifact(
+fn artifact_download_does_not_require_auth() {
+    assert!(!command_requires_auth(&CliCommand::Artifact(
         ArtifactCommand::Download(DownloadArtifactArgs {
             artifact_uid: "artifact-123".to_string(),
             out: None,
@@ -36,8 +36,8 @@ fn run_message_send_requires_auth() {
 }
 
 #[test]
-fn artifact_get_requires_auth() {
-    assert!(command_requires_auth(&CliCommand::Artifact(
+fn artifact_get_does_not_require_auth() {
+    assert!(!command_requires_auth(&CliCommand::Artifact(
         ArtifactCommand::Get(GetArtifactArgs {
             artifact_uid: "artifact-123".to_string(),
         },)

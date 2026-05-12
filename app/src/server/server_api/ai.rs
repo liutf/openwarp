@@ -151,137 +151,6 @@ pub struct SpawnAgentResponse {
     pub at_capacity: bool,
 }
 
-/// Response from the artifact endpoint.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(tag = "artifact_type")]
-pub enum ArtifactDownloadResponse {
-    #[serde(rename = "SCREENSHOT")]
-    Screenshot {
-        #[serde(flatten)]
-        common: ArtifactDownloadCommonFields,
-        data: ScreenshotArtifactResponseData,
-    },
-    #[serde(rename = "FILE")]
-    File {
-        #[serde(flatten)]
-        common: ArtifactDownloadCommonFields,
-        data: FileArtifactResponseData,
-    },
-}
-
-impl ArtifactDownloadResponse {
-    fn common(&self) -> &ArtifactDownloadCommonFields {
-        match self {
-            ArtifactDownloadResponse::Screenshot { common, .. }
-            | ArtifactDownloadResponse::File { common, .. } => common,
-        }
-    }
-
-    pub fn artifact_uid(&self) -> &str {
-        &self.common().artifact_uid
-    }
-
-    pub fn artifact_type(&self) -> &'static str {
-        match self {
-            ArtifactDownloadResponse::Screenshot { .. } => "SCREENSHOT",
-            ArtifactDownloadResponse::File { .. } => "FILE",
-        }
-    }
-
-    pub fn created_at(&self) -> DateTime<Utc> {
-        self.common().created_at
-    }
-
-    pub fn download_url(&self) -> &str {
-        match self {
-            ArtifactDownloadResponse::Screenshot { data, .. } => &data.download_url,
-            ArtifactDownloadResponse::File { data, .. } => &data.download_url,
-        }
-    }
-
-    pub fn expires_at(&self) -> DateTime<Utc> {
-        match self {
-            ArtifactDownloadResponse::Screenshot { data, .. } => data.expires_at,
-            ArtifactDownloadResponse::File { data, .. } => data.expires_at,
-        }
-    }
-
-    pub fn content_type(&self) -> &str {
-        match self {
-            ArtifactDownloadResponse::Screenshot { data, .. } => &data.content_type,
-            ArtifactDownloadResponse::File { data, .. } => &data.content_type,
-        }
-    }
-
-    pub fn filepath(&self) -> Option<&str> {
-        match self {
-            ArtifactDownloadResponse::Screenshot { .. } => None,
-            ArtifactDownloadResponse::File { data, .. } => Some(&data.filepath),
-        }
-    }
-
-    pub fn filename(&self) -> Option<&str> {
-        match self {
-            ArtifactDownloadResponse::Screenshot { .. } => None,
-            ArtifactDownloadResponse::File { data, .. } => Some(&data.filename),
-        }
-    }
-
-    pub fn description(&self) -> Option<&str> {
-        match self {
-            ArtifactDownloadResponse::Screenshot { data, .. } => data.description.as_deref(),
-            ArtifactDownloadResponse::File { data, .. } => data.description.as_deref(),
-        }
-    }
-
-    pub fn size_bytes(&self) -> Option<i64> {
-        match self {
-            ArtifactDownloadResponse::Screenshot { .. } => None,
-            ArtifactDownloadResponse::File { data, .. } => data.size_bytes,
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ArtifactDownloadCommonFields {
-    pub artifact_uid: String,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Screenshot-specific data from the artifact endpoint.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ScreenshotArtifactResponseData {
-    pub download_url: String,
-    pub expires_at: DateTime<Utc>,
-    pub content_type: String,
-    pub description: Option<String>,
-}
-
-/// File-specific data from the artifact endpoint.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct FileArtifactResponseData {
-    pub download_url: String,
-    pub expires_at: DateTime<Utc>,
-    pub content_type: String,
-    pub filepath: String,
-    pub filename: String,
-    pub description: Option<String>,
-    pub size_bytes: Option<i64>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct HandoffSnapshotAttachmentInfo {
-    pub attachment_id: String,
-    pub filename: String,
-    pub download_url: String,
-    pub mime_type: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct ListHandoffSnapshotAttachmentsResponse {
-    pub attachments: Vec<HandoffSnapshotAttachmentInfo>,
-}
-
 /// Filter parameters for listing ambient agent tasks.
 #[derive(Clone, Debug, Default)]
 pub struct TaskListFilter {
@@ -596,11 +465,6 @@ pub trait AIClient: 'static + Send + Sync {
         task_id: &AmbientAgentTaskId,
     ) -> anyhow::Result<(), anyhow::Error>;
 
-    async fn get_artifact_download(
-        &self,
-        artifact_uid: &str,
-    ) -> anyhow::Result<ArtifactDownloadResponse, anyhow::Error>;
-
     // --- Orchestrations V2 messaging ---
 
     async fn send_agent_message(
@@ -725,13 +589,6 @@ impl AIClient for LocalAIClient {
         _task_id: &AmbientAgentTaskId,
     ) -> anyhow::Result<(), anyhow::Error> {
         Err(disabled_ai_client_method("cancel_ambient_agent_task"))
-    }
-
-    async fn get_artifact_download(
-        &self,
-        _artifact_uid: &str,
-    ) -> anyhow::Result<ArtifactDownloadResponse, anyhow::Error> {
-        Err(disabled_ai_client_method("get_artifact_download"))
     }
 
     async fn send_agent_message(
