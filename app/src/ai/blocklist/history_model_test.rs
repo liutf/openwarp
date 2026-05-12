@@ -8,19 +8,16 @@ use warpui::{App, EntityId};
 use crate::{
     ai::{
         agent::{
-            api::ServerConversationToken,
-            conversation::{AIAgentHarness, AIConversationId, ServerAIConversationMetadata},
-            AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus,
-            FinishedAIAgentOutput, Shared, UserQueryMode,
+            api::ServerConversationToken, conversation::AIConversationId, AIAgentExchange,
+            AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, FinishedAIAgentOutput, Shared,
+            UserQueryMode,
         },
         ambient_agents::AmbientAgentTaskId,
         blocklist::{controller::RequestInput, ResponseStreamId},
         llms::LLMId,
     },
-    cloud_object::{Owner, Revision, ServerMetadata, ServerPermissions},
     input_suggestions::HistoryInputSuggestion,
     persistence::{model::PersistedAutoexecuteMode, ModelEvent},
-    server::ids::ServerId,
     terminal::model::session::SessionId,
     test_util::settings::initialize_settings_for_tests,
     GlobalResourceHandles, GlobalResourceHandlesProvider,
@@ -294,63 +291,6 @@ fn test_ai_queries_for_terminal_view_up_arrow_history() {
     });
 }
 
-/// Helper function to create ServerMetadata for testing
-fn create_mock_server_metadata() -> ServerMetadata {
-    ServerMetadata {
-        uid: ServerId::default(),
-        revision: Revision::now(),
-        metadata_last_updated_ts: Utc::now().into(),
-        trashed_ts: None,
-        folder_id: None,
-        is_welcome_object: false,
-        creator_uid: None,
-        last_editor_uid: None,
-        current_editor_uid: None,
-    }
-}
-
-/// Helper function to create ServerPermissions for testing
-fn create_mock_server_permissions() -> ServerPermissions {
-    ServerPermissions {
-        space: Owner::mock_current_user(),
-        guests: Vec::new(),
-        anyone_link_sharing: None,
-        permissions_last_updated_ts: Utc::now().into(),
-    }
-}
-
-/// Helper function to create ServerAIConversationMetadata for testing
-fn create_server_metadata(
-    title: &str,
-    server_token: &str,
-    credits_spent: f32,
-    ambient_agent_task_id: Option<AmbientAgentTaskId>,
-) -> ServerAIConversationMetadata {
-    use crate::persistence::model::ConversationUsageMetadata;
-
-    // Create ConversationUsageMetadata from persistence model
-    let usage = ConversationUsageMetadata {
-        was_summarized: false,
-        context_window_usage: 0.0,
-        credits_spent,
-        credits_spent_for_last_block: None,
-        token_usage: vec![],
-        tool_usage_metadata: Default::default(),
-    };
-
-    ServerAIConversationMetadata {
-        title: title.to_string(),
-        usage,
-        metadata: create_mock_server_metadata(),
-        permissions: create_mock_server_permissions(),
-        ambient_agent_task_id,
-        server_conversation_token: ServerConversationToken::new(server_token.to_string()),
-        artifacts: Vec::new(),
-        working_directory: None,
-        harness: AIAgentHarness::Oz,
-    }
-}
-
 #[test]
 fn test_transcript_viewer_terminal_view_is_not_marked_historical() {
     App::test((), |mut app| async move {
@@ -419,53 +359,37 @@ fn test_ambient_agent_conversations_excluded_from_list_but_accessible_by_id() {
         let ambient_task_id: AmbientAgentTaskId = uuid::Uuid::new_v4().to_string().parse().unwrap();
 
         history_model.update(&mut app, |model, _| {
-            let regular_server_metadata =
-                create_server_metadata("Regular Conversation", "token-regular", 5.0, None);
             let regular_metadata = AIConversationMetadata {
                 id: regular_id,
-                title: regular_server_metadata.title.clone(),
+                title: "Regular Conversation".to_string(),
                 initial_query: String::new(),
-                last_modified_at: regular_server_metadata
-                    .metadata
-                    .metadata_last_updated_ts
-                    .utc()
-                    .naive_utc(),
+                last_modified_at: Utc::now().naive_utc(),
                 initial_working_directory: None,
-                credits_spent: Some(regular_server_metadata.usage.credits_spent),
-                server_conversation_token: Some(
-                    regular_server_metadata.server_conversation_token.clone(),
-                ),
+                credits_spent: Some(5.0),
+                server_conversation_token: Some(ServerConversationToken::new(
+                    "token-regular".to_string(),
+                )),
                 has_local_data: false,
                 artifacts: Vec::new(),
-                server_conversation_metadata: Some(regular_server_metadata),
+                ambient_agent_task_id: None,
             };
             model
                 .all_conversations_metadata
                 .insert(regular_id, regular_metadata);
 
-            let ambient_server_metadata = create_server_metadata(
-                "Ambient Conversation",
-                "token-ambient",
-                3.0,
-                Some(ambient_task_id),
-            );
             let ambient_metadata = AIConversationMetadata {
                 id: ambient_id,
-                title: ambient_server_metadata.title.clone(),
+                title: "Ambient Conversation".to_string(),
                 initial_query: String::new(),
-                last_modified_at: ambient_server_metadata
-                    .metadata
-                    .metadata_last_updated_ts
-                    .utc()
-                    .naive_utc(),
+                last_modified_at: Utc::now().naive_utc(),
                 initial_working_directory: None,
-                credits_spent: Some(ambient_server_metadata.usage.credits_spent),
-                server_conversation_token: Some(
-                    ambient_server_metadata.server_conversation_token.clone(),
-                ),
+                credits_spent: Some(3.0),
+                server_conversation_token: Some(ServerConversationToken::new(
+                    "token-ambient".to_string(),
+                )),
                 has_local_data: false,
                 artifacts: Vec::new(),
-                server_conversation_metadata: Some(ambient_server_metadata),
+                ambient_agent_task_id: Some(ambient_task_id),
             };
             model
                 .all_conversations_metadata

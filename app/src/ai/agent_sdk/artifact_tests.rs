@@ -3,23 +3,6 @@ use warp_cli::agent::OutputFormat;
 
 use super::*;
 
-fn sample_completed_upload() -> CompletedFileArtifactUpload {
-    CompletedFileArtifactUpload {
-        artifact: sample_artifact_record(),
-        size_bytes: 42,
-    }
-}
-
-fn sample_artifact_record() -> FileArtifactRecord {
-    FileArtifactRecord {
-        artifact_uid: "artifact-123".to_string(),
-        filepath: "outputs/report.txt".to_string(),
-        description: Some("daily summary".to_string()),
-        mime_type: "text/plain".to_string(),
-        size_bytes: Some(42),
-    }
-}
-
 fn sample_file_download_response() -> ArtifactDownloadResponse {
     serde_json::from_str(
         r#"{
@@ -193,63 +176,5 @@ fn download_destination_defaults_pdf_to_artifact_uid_with_extension() {
     assert_eq!(
         download_destination(&artifact, None),
         PathBuf::from("artifact-artifact-pdf-123.pdf")
-    );
-}
-
-#[test]
-fn write_upload_output_to_writes_json_output() {
-    let mut output = Vec::new();
-
-    write_upload_output_to(&mut output, &sample_completed_upload(), OutputFormat::Json).unwrap();
-
-    assert_eq!(
-        String::from_utf8(output).unwrap(),
-        "{\"artifact_uid\":\"artifact-123\",\"filepath\":\"outputs/report.txt\",\"description\":\"daily summary\",\"mime_type\":\"text/plain\",\"size_bytes\":42}\n"
-    );
-}
-
-#[test]
-fn write_upload_output_to_writes_ndjson_output() {
-    let mut output = Vec::new();
-
-    write_upload_output_to(
-        &mut output,
-        &sample_completed_upload(),
-        OutputFormat::Ndjson,
-    )
-    .unwrap();
-
-    assert_eq!(
-        String::from_utf8(output).unwrap(),
-        "{\"artifact_uid\":\"artifact-123\",\"filepath\":\"outputs/report.txt\",\"description\":\"daily summary\",\"mime_type\":\"text/plain\",\"size_bytes\":42}\n"
-    );
-}
-
-#[test]
-fn write_upload_output_to_writes_pretty_output() {
-    let mut output = Vec::new();
-
-    write_upload_output_to(
-        &mut output,
-        &sample_completed_upload(),
-        OutputFormat::Pretty,
-    )
-    .unwrap();
-
-    assert_eq!(
-        String::from_utf8(output).unwrap(),
-        "Artifact uploaded\nArtifact UID: artifact-123\nFilepath: outputs/report.txt\nDescription: daily summary\nMIME type: text/plain\nSize bytes: 42\n"
-    );
-}
-
-#[test]
-fn write_upload_output_to_writes_text_output() {
-    let mut output = Vec::new();
-
-    write_upload_output_to(&mut output, &sample_completed_upload(), OutputFormat::Text).unwrap();
-
-    assert_eq!(
-        String::from_utf8(output).unwrap(),
-        "Artifact UID\tFilepath\tDescription\tMIME type\tSize bytes\nartifact-123\toutputs/report.txt\tdaily summary\ttext/plain\t42\n"
     );
 }

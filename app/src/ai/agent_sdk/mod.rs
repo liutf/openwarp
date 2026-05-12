@@ -68,7 +68,6 @@ mod admin;
 mod agent_config;
 mod ambient;
 mod artifact;
-pub(crate) mod artifact_upload;
 mod common;
 mod config_file;
 pub(crate) mod driver;
@@ -1116,7 +1115,10 @@ fn command_requires_auth(command: &CliCommand) -> bool {
         CliCommand::Secret(_) => true,
         CliCommand::Federate(_) => true,
         CliCommand::HarnessSupport(_) => true,
-        CliCommand::Artifact(_) => true,
+        CliCommand::Artifact(artifact_cmd) => match artifact_cmd {
+            ArtifactCommand::Upload(_) => false,
+            ArtifactCommand::Get(_) | ArtifactCommand::Download(_) => true,
+        },
     }
 }
 

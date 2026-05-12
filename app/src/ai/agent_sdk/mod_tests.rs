@@ -45,8 +45,8 @@ fn artifact_get_requires_auth() {
 }
 
 #[test]
-fn artifact_upload_requires_auth() {
-    assert!(command_requires_auth(&CliCommand::Artifact(
+fn artifact_upload_does_not_require_auth() {
+    assert!(!command_requires_auth(&CliCommand::Artifact(
         ArtifactCommand::Upload(UploadArtifactArgs {
             path: "artifact.txt".into(),
             run_id: Some("run-123".to_string()),

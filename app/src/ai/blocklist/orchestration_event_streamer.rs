@@ -651,7 +651,7 @@ impl OrchestrationEventStreamer {
         let mut events = Vec::new();
         let mut messages = Vec::new();
 
-        while let Ok(Some(item)) = sse.event_receiver.try_next() {
+        while let Ok(item) = sse.event_receiver.try_recv() {
             // Deduplicate: discard events at or below the cursor.
             if item.event.sequence > cursor {
                 if let Some(msg) = item.fetched_message {

@@ -21,11 +21,12 @@ use diesel::SqliteConnection;
 
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::ConversationStatus;
-use crate::ai::agent::conversation::{ServerAIConversationMetadata, UpdateConversationError};
+use crate::ai::agent::conversation::UpdateConversationError;
 use crate::ai::agent::task::helper::{MessageExt, ToolCallExt};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::AIAgentExchangeId;
 use crate::ai::agent::CancellationReason;
+use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::artifacts::Artifact;
 use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::input_suggestions::HistoryOrder;
@@ -84,9 +85,8 @@ pub struct AIConversationMetadata {
     /// Artifacts (plans, PRs) created during this conversation.
     pub artifacts: Vec<Artifact>,
 
-    /// Full server metadata for cloud conversations, including permissions.
-    /// Used by the sharing dialog to display permissions when the full conversation isn't loaded.
-    pub server_conversation_metadata: Option<ServerAIConversationMetadata>,
+    /// Local marker for conversations owned by an ambient agent run.
+    pub ambient_agent_task_id: Option<AmbientAgentTaskId>,
 }
 
 impl From<&AIConversation> for AIConversationMetadata {
@@ -109,7 +109,9 @@ impl From<&AIConversation> for AIConversationMetadata {
             server_conversation_token: conversation.server_conversation_token().cloned(),
             has_local_data: true,
             artifacts: conversation.artifacts().to_vec(),
-            server_conversation_metadata: conversation.server_metadata().cloned(),
+            ambient_agent_task_id: conversation
+                .server_metadata()
+                .and_then(|metadata| metadata.ambient_agent_task_id),
         }
     }
 }
@@ -118,9 +120,7 @@ impl AIConversationMetadata {
     /// Whether this conversation is owned by an ambient agent run rather than
     /// being a direct user conversation.
     pub fn is_ambient_agent_conversation(&self) -> bool {
-        self.server_conversation_metadata
-            .as_ref()
-            .is_some_and(|m| m.ambient_agent_task_id.is_some())
+        self.ambient_agent_task_id.is_some()
     }
 }
 
@@ -446,41 +446,6 @@ impl BlocklistAIHistoryModel {
         conversation.set_server_conversation_token(token.clone());
         self.server_token_to_conversation_id
             .insert(ServerConversationToken::new(token), conversation_id);
-    }
-
-    /// Sets server metadata for a conversation and emits the ConversationMetadataUpdated event.
-    /// This helper ensures we don't forget to emit the event when updating metadata.
-    /// Updates in-memory conversations, or historical metadata if the conversation isn't loaded.
-    pub fn set_server_metadata_for_conversation(
-        &mut self,
-        conversation_id: AIConversationId,
-        metadata: ServerAIConversationMetadata,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        let terminal_view_id;
-
-        // Update in-memory conversation if it exists
-        if let Some(conversation) = self.conversations_by_id.get_mut(&conversation_id) {
-            conversation.set_server_metadata(metadata);
-            terminal_view_id = self.terminal_view_id_for_conversation(&conversation_id);
-        } else if let Some(conversation_metadata) =
-            self.all_conversations_metadata.get_mut(&conversation_id)
-        {
-            // Conversation not in memory - update historical metadata instead
-            // This is needed because we might update permissions from share dialog in
-            // conversation list view when we only have metadata.
-            conversation_metadata.server_conversation_metadata = Some(metadata);
-            terminal_view_id = None;
-        } else {
-            // Conversation not found anywhere
-            return;
-        }
-
-        // Emit event so sharing dialog and other listeners can refresh.
-        ctx.emit(BlocklistAIHistoryEvent::UpdatedConversationMetadata {
-            terminal_view_id,
-            conversation_id,
-        });
     }
 
     /// Returns the ID of the conversation that processed or is processing the response stream.

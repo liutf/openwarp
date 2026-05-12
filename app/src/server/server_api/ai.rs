@@ -1,4 +1,4 @@
-// OpenWarp(本地化,Wave 2-2):`AIClient` trait 的全部 38 个方法已本地化为 stub。
+// OpenWarp(本地化,Wave 2-2):`AIClient` trait 的云端方法已本地化为 stub。
 // 历史职责:通过 warp.dev 后端的 GraphQL/HTTP RPC 完成 AI 对话、命令生成、
 // ambient agent 远程调度、conversation 同步、artifact 上传/下载、orchestration v2 消息等。
 // BYOP(Bring-Your-Own-Provider)链路完全不经过 `AIClient` trait —— 走
@@ -320,44 +320,6 @@ pub struct PrepareAttachmentUploadsResponse {
     pub attachments: Vec<AttachmentUploadInfo>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CreateFileArtifactUploadRequest {
-    pub conversation_id: Option<String>,
-    pub run_id: Option<String>,
-    pub filepath: String,
-    pub description: Option<String>,
-    pub mime_type: Option<String>,
-    pub size_bytes: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileArtifactRecord {
-    pub artifact_uid: String,
-    pub filepath: String,
-    pub description: Option<String>,
-    pub mime_type: String,
-    pub size_bytes: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileArtifactUploadHeaderInfo {
-    pub name: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileArtifactUploadTargetInfo {
-    pub url: String,
-    pub method: String,
-    pub headers: Vec<FileArtifactUploadHeaderInfo>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateFileArtifactUploadResponse {
-    pub artifact: FileArtifactRecord,
-    pub upload_target: FileArtifactUploadTargetInfo,
-}
-
 /// Filter parameters for listing ambient agent tasks.
 #[derive(Clone, Debug, Default)]
 pub struct TaskListFilter {
@@ -677,17 +639,6 @@ pub trait AIClient: 'static + Send + Sync {
         task_id: String,
     ) -> anyhow::Result<Vec<TaskAttachment>, anyhow::Error>;
 
-    async fn create_file_artifact_upload_target(
-        &self,
-        request: CreateFileArtifactUploadRequest,
-    ) -> anyhow::Result<CreateFileArtifactUploadResponse, anyhow::Error>;
-
-    async fn confirm_file_artifact_upload(
-        &self,
-        artifact_uid: String,
-        checksum: String,
-    ) -> anyhow::Result<FileArtifactRecord, anyhow::Error>;
-
     async fn get_artifact_download(
         &self,
         artifact_uid: &str,
@@ -841,23 +792,6 @@ impl AIClient for LocalAIClient {
         _task_id: String,
     ) -> anyhow::Result<Vec<TaskAttachment>, anyhow::Error> {
         Err(disabled_ai_client_method("get_task_attachments"))
-    }
-
-    async fn create_file_artifact_upload_target(
-        &self,
-        _request: CreateFileArtifactUploadRequest,
-    ) -> anyhow::Result<CreateFileArtifactUploadResponse, anyhow::Error> {
-        Err(disabled_ai_client_method(
-            "create_file_artifact_upload_target",
-        ))
-    }
-
-    async fn confirm_file_artifact_upload(
-        &self,
-        _artifact_uid: String,
-        _checksum: String,
-    ) -> anyhow::Result<FileArtifactRecord, anyhow::Error> {
-        Err(disabled_ai_client_method("confirm_file_artifact_upload"))
     }
 
     async fn get_artifact_download(

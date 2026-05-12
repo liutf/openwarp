@@ -330,8 +330,7 @@ impl BlocklistAIHistoryModel {
                     server_conversation_token,
                     has_local_data: true,
                     artifacts,
-                    // Only populated when loading from server, not from local DB
-                    server_conversation_metadata: None,
+                    ambient_agent_task_id: None,
                 }))
             })
             .collect();

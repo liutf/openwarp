@@ -6,22 +6,16 @@
 // 保留:
 //   - `HttpStatusError`:被 retry_strategies / agent_sdk/retry / agent_sdk/driver/attachments
 //     等多处用于"瞬时 vs 永久"HTTP 错误分类,与 stub 化无关,纯通用类型。
-//   - `upload_to_target` / `upload_file_to_target`:函数签名保留,所有调用一律返回
+//   - `upload_to_target`:函数签名保留,所有调用一律返回
 //     "Presigned upload disabled in OpenWarp" 错误,让上层 caller 走 `?` 自然失败。
 // 删除:
 //   - CRC32C checksum 流式计算、build_upload_request / send_upload_request /
 //     ensure_upload_succeeded / NormalizedUploadTarget 等所有 HTTP 上传内部辅助。
-//   - 对 `super::ai::FileArtifactUploadTargetInfo` / `super::harness_support::UploadTarget`
-//     的 `From` 适配(stub 后不再需要规整化)。
-
-#[cfg(not(target_family = "wasm"))]
-use std::path::Path;
+//   - 对 `super::harness_support::UploadTarget` 的 `From` 适配(stub 后不再需要规整化)。
 
 use anyhow::{anyhow, Result};
 use thiserror::Error;
 
-#[cfg(not(target_family = "wasm"))]
-use super::ai::FileArtifactUploadTargetInfo;
 use super::harness_support::UploadTarget;
 
 /// Typed error for HTTP-backed operations so downstream classifiers (e.g. the agent-SDK
@@ -43,16 +37,5 @@ pub(crate) async fn upload_to_target(
     _target: &UploadTarget,
     _body: impl Into<reqwest::Body>,
 ) -> Result<()> {
-    Err(anyhow!("Presigned upload disabled in OpenWarp"))
-}
-
-/// OpenWarp:云端 file artifact 上传已下线,签名保留以兼容现有 caller,直接返回错误。
-#[cfg(not(target_family = "wasm"))]
-pub(crate) async fn upload_file_to_target(
-    _http_client: &http_client::Client,
-    _target: &FileArtifactUploadTargetInfo,
-    _path: &Path,
-    _file_size: u64,
-) -> Result<String> {
     Err(anyhow!("Presigned upload disabled in OpenWarp"))
 }
