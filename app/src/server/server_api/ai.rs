@@ -12,29 +12,21 @@ use chrono::{DateTime, Utc};
 #[cfg(test)]
 use mockall::automock;
 use warp_core::report_error;
-use warp_multi_agent_api::ConversationData;
 
 use super::ServerApi;
-use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::conversation::{AIAgentConversationFormat, ServerAIConversationMetadata};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::generate_code_review_content::api::{
     GenerateCodeReviewContentRequest, GenerateCodeReviewContentResponse,
 };
-use crate::terminal::model::block::SerializedBlock;
 use crate::{
-    ai::{
-        llms::{
-            AvailableLLMs, DisableReason, LLMContextWindow, LLMInfo, LLMProvider, LLMSpec,
-            LLMUsageMetadata, ModelsByFeature, RoutingHostConfig,
-        },
-        RequestUsageInfo,
+    ai::llms::{
+        AvailableLLMs, DisableReason, LLMContextWindow, LLMInfo, LLMProvider, LLMSpec,
+        LLMUsageMetadata, ModelsByFeature, RoutingHostConfig,
     },
     ai_assistant::{
         execution_context::WarpAiExecutionContext, requests::GenerateDialogueResult,
         utils::TranscriptPart, AIGeneratedCommand, GenerateCommandsFromNaturalLanguageError,
     },
-    drive::workflows::ai_assist::{GeneratedCommandMetadata, GeneratedCommandMetadataError},
 };
 use warp_graphql::ai::{AgentTaskState, PlatformErrorCode};
 use warp_graphql::queries::get_scheduled_agent_history::ScheduledAgentHistory;
@@ -139,20 +131,6 @@ pub struct AgentRunEvent {
     pub ref_id: Option<String>,
     pub execution_id: Option<String>,
     pub occurred_at: String,
-    pub sequence: i64,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ReportAgentEventRequest {
-    pub event_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ref_id: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ReportAgentEventResponse {
     pub sequence: i64,
 }
 
@@ -635,37 +613,6 @@ pub trait AIClient: 'static + Send + Sync {
         ai_execution_context: Option<WarpAiExecutionContext>,
     ) -> anyhow::Result<GenerateDialogueResult>;
 
-    async fn generate_metadata_for_command(
-        &self,
-        command: String,
-    ) -> Result<GeneratedCommandMetadata, GeneratedCommandMetadataError>;
-
-    async fn get_request_limit_info(&self) -> Result<RequestUsageInfo, anyhow::Error>;
-
-    async fn get_feature_model_choices(&self) -> Result<ModelsByFeature, anyhow::Error>;
-
-    /// Fetches the free-tier available models without requiring authentication.
-    /// Used during pre-login onboarding so logged-out users see an accurate model list
-    /// instead of the hard-coded `ModelsByFeature::default()` fallback.
-    async fn get_free_available_models(
-        &self,
-        referrer: Option<String>,
-    ) -> Result<ModelsByFeature, anyhow::Error>;
-
-    async fn provide_negative_feedback_response_for_ai_conversation(
-        &self,
-        conversation_id: String,
-        request_ids: Vec<String>,
-    ) -> anyhow::Result<i32, anyhow::Error>;
-
-    async fn create_agent_task(
-        &self,
-        prompt: String,
-        environment_uid: Option<String>,
-        parent_run_id: Option<String>,
-        config: Option<AgentConfigSnapshot>,
-    ) -> anyhow::Result<AmbientAgentTaskId, anyhow::Error>;
-
     async fn update_agent_task(
         &self,
         task_id: AmbientAgentTaskId,
@@ -708,31 +655,6 @@ pub trait AIClient: 'static + Send + Sync {
         &self,
         schedule_id: &str,
     ) -> anyhow::Result<ScheduledAgentHistory, anyhow::Error>;
-
-    async fn get_ai_conversation(
-        &self,
-        server_conversation_token: ServerConversationToken,
-    ) -> anyhow::Result<(ConversationData, ServerAIConversationMetadata), anyhow::Error>;
-
-    async fn list_ai_conversation_metadata(
-        &self,
-        conversation_ids: Option<Vec<String>>,
-    ) -> anyhow::Result<Vec<ServerAIConversationMetadata>>;
-
-    async fn get_ai_conversation_format(
-        &self,
-        server_conversation_token: ServerConversationToken,
-    ) -> anyhow::Result<AIAgentConversationFormat, anyhow::Error>;
-
-    async fn get_block_snapshot(
-        &self,
-        server_conversation_token: ServerConversationToken,
-    ) -> anyhow::Result<SerializedBlock, anyhow::Error>;
-
-    async fn delete_ai_conversation(
-        &self,
-        server_conversation_token: String,
-    ) -> anyhow::Result<(), anyhow::Error>;
 
     async fn list_agents(
         &self,
@@ -805,12 +727,6 @@ pub trait AIClient: 'static + Send + Sync {
         sequence: i64,
     ) -> anyhow::Result<(), anyhow::Error>;
 
-    async fn report_agent_event(
-        &self,
-        run_id: &str,
-        request: ReportAgentEventRequest,
-    ) -> anyhow::Result<ReportAgentEventResponse, anyhow::Error>;
-
     async fn mark_message_delivered(&self, message_id: &str) -> anyhow::Result<(), anyhow::Error>;
 
     async fn read_agent_message(
@@ -863,59 +779,6 @@ impl AIClient for ServerApi {
     ) -> anyhow::Result<GenerateDialogueResult> {
         Err(anyhow!(
             "AI client `generate_dialogue_answer` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn generate_metadata_for_command(
-        &self,
-        _command: String,
-    ) -> Result<GeneratedCommandMetadata, GeneratedCommandMetadataError> {
-        // OpenWarp:Workflow AI Autofill 等"为命令生成元数据"已下线。
-        Err(GeneratedCommandMetadataError::Other)
-    }
-
-    async fn get_request_limit_info(&self) -> Result<RequestUsageInfo, anyhow::Error> {
-        // OpenWarp:无云端配额,直接 Err。上层调用点(Requests::update_request_limit_info)
-        // 已忽略 Err 并保留本地 RequestLimitInfo::default()("无限额")fallback。
-        Err(anyhow!(
-            "AI client `get_request_limit_info` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_feature_model_choices(&self) -> Result<ModelsByFeature, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_feature_model_choices` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_free_available_models(
-        &self,
-        _referrer: Option<String>,
-    ) -> Result<ModelsByFeature, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_free_available_models` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn provide_negative_feedback_response_for_ai_conversation(
-        &self,
-        _conversation_id: String,
-        _request_ids: Vec<String>,
-    ) -> anyhow::Result<i32, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `provide_negative_feedback_response_for_ai_conversation` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn create_agent_task(
-        &self,
-        _prompt: String,
-        _environment_uid: Option<String>,
-        _parent_run_id: Option<String>,
-        _config: Option<AgentConfigSnapshot>,
-    ) -> anyhow::Result<AmbientAgentTaskId, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `create_agent_task` is disabled in OpenWarp"
         ))
     }
 
@@ -983,51 +846,6 @@ impl AIClient for ServerApi {
     ) -> anyhow::Result<ScheduledAgentHistory, anyhow::Error> {
         Err(anyhow!(
             "AI client `get_scheduled_agent_history` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_ai_conversation(
-        &self,
-        _server_conversation_token: ServerConversationToken,
-    ) -> anyhow::Result<(ConversationData, ServerAIConversationMetadata), anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_ai_conversation` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn list_ai_conversation_metadata(
-        &self,
-        _conversation_ids: Option<Vec<String>>,
-    ) -> anyhow::Result<Vec<ServerAIConversationMetadata>> {
-        Err(anyhow!(
-            "AI client `list_ai_conversation_metadata` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_ai_conversation_format(
-        &self,
-        _server_conversation_token: ServerConversationToken,
-    ) -> anyhow::Result<AIAgentConversationFormat, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_ai_conversation_format` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_block_snapshot(
-        &self,
-        _server_conversation_token: ServerConversationToken,
-    ) -> anyhow::Result<SerializedBlock, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_block_snapshot` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn delete_ai_conversation(
-        &self,
-        _server_conversation_token: String,
-    ) -> anyhow::Result<(), anyhow::Error> {
-        Err(anyhow!(
-            "AI client `delete_ai_conversation` is disabled in OpenWarp"
         ))
     }
 
@@ -1139,16 +957,6 @@ impl AIClient for ServerApi {
     ) -> anyhow::Result<(), anyhow::Error> {
         Err(anyhow!(
             "AI client `update_event_sequence_on_server` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn report_agent_event(
-        &self,
-        _run_id: &str,
-        _request: ReportAgentEventRequest,
-    ) -> anyhow::Result<ReportAgentEventResponse, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `report_agent_event` is disabled in OpenWarp"
         ))
     }
 
