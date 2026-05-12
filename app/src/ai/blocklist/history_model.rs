@@ -54,7 +54,7 @@ use super::RequestInput;
 mod conversation_loader;
 pub use conversation_loader::{
     convert_persisted_conversation_to_ai_conversation_with_metadata, CLIAgentConversation,
-    CloudConversationData,
+    LoadedConversationData,
 };
 
 pub(super) const MAX_HISTORICAL_CONVERSATIONS: usize = 100;

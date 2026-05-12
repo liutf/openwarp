@@ -10,7 +10,7 @@ use crate::ai::blocklist::agent_view::{
     AgentViewEntryBlockParams, AgentViewEntryOrigin, DismissalStrategy, EphemeralMessage,
 };
 use crate::ai::blocklist::block::cli_controller::CLISubagentController;
-use crate::ai::blocklist::history_model::{CLIAgentConversation, CloudConversationData};
+use crate::ai::blocklist::history_model::{CLIAgentConversation, LoadedConversationData};
 use crate::ai::blocklist::BlocklistAIContextModel;
 use crate::terminal::input::message_bar::Message as InputMessage;
 use crate::terminal::input::message_bar::MessageItem;
@@ -206,17 +206,17 @@ impl TerminalView {
     /// already in the right directory, or we need to cd.
     fn resolve_dir_restoration_state(
         &self,
-        cloud_conversation: &CloudConversationData,
+        cloud_conversation: &LoadedConversationData,
     ) -> RestorationDirState {
         let target_dir = match cloud_conversation {
-            CloudConversationData::Oz(conversation) => {
+            LoadedConversationData::Oz(conversation) => {
                 conversation.initial_working_directory().or_else(|| {
                     conversation
                         .server_metadata()
                         .and_then(|metadata| metadata.working_directory.clone())
                 })
             }
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 cli_conversation.metadata.working_directory.clone()
             }
         };
@@ -239,7 +239,7 @@ impl TerminalView {
 
     pub(crate) fn restore_conversation_and_directory_context<F>(
         &mut self,
-        cloud_conversation: CloudConversationData,
+        cloud_conversation: LoadedConversationData,
         use_live_appearance: bool,
         on_restored: F,
         ctx: &mut ViewContext<Self>,
@@ -255,14 +255,14 @@ impl TerminalView {
                 me.maybe_show_restore_context_hint(restore_dir_state, ctx);
 
                 match cloud_conversation {
-                    CloudConversationData::Oz(conversation) => {
+                    LoadedConversationData::Oz(conversation) => {
                         me.restore_conversation_after_view_creation(
                             RestoredAIConversation::new(*conversation),
                             use_live_appearance,
                             ctx,
                         );
                     }
-                    CloudConversationData::CLIAgent(cli_conversation) => {
+                    LoadedConversationData::CLIAgent(cli_conversation) => {
                         if FeatureFlag::AgentHarness.is_enabled() {
                             me.restore_cli_agent_block_snapshot(cli_conversation.block);
                         } else {

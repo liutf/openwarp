@@ -10,7 +10,7 @@ use crate::{
                 AgentViewEntryOrigin, AutoTriggerBehavior, DismissalStrategy, EnterAgentViewError,
                 EphemeralMessage, ENTER_OR_EXIT_CONFIRMATION_WINDOW,
             },
-            history_model::CloudConversationData,
+            history_model::LoadedConversationData,
             BlocklistAIHistoryModel,
         },
     },
@@ -134,7 +134,7 @@ impl TerminalView {
                 #[allow(clippy::type_complexity)]
                 let on_restored: Box<
                     dyn FnOnce(&mut Self, &mut ViewContext<Self>),
-                > = if matches!(&conversation, CloudConversationData::Oz(_)) {
+                > = if matches!(&conversation, LoadedConversationData::Oz(_)) {
                     Box::new(move |me, ctx| {
                         me.enter_agent_view_for_conversation(
                             initial_prompt,

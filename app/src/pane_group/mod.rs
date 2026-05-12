@@ -6,7 +6,7 @@ use crate::ai::agent_conversations_model::{
 use crate::ai::ai_document_view::AIDocumentView;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::history_model::CloudConversationData;
+use crate::ai::blocklist::history_model::LoadedConversationData;
 use crate::ai::blocklist::inline_action::code_diff_view::CodeDiffView;
 use crate::ai::blocklist::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
 use crate::ai::blocklist::suggested_rule_modal::SuggestedRuleAndId;
@@ -3562,7 +3562,7 @@ impl PaneGroup {
     /// Uses the active session view as the target.
     pub fn load_data_into_conversation_transcript_viewer(
         &mut self,
-        conversation: CloudConversationData,
+        conversation: LoadedConversationData,
         ctx: &mut ViewContext<Self>,
     ) {
         // Get the active terminal view
@@ -3577,7 +3577,7 @@ impl PaneGroup {
     fn load_data_into_transcript_viewer(
         &mut self,
         terminal_view: ViewHandle<TerminalView>,
-        cloud_conversation: CloudConversationData,
+        cloud_conversation: LoadedConversationData,
         ctx: &mut ViewContext<Self>,
     ) {
         let terminal_manager = self
@@ -3587,10 +3587,10 @@ impl PaneGroup {
             .map(|session| session.terminal_manager(ctx));
 
         let ambient_agent_task_id = match &cloud_conversation {
-            CloudConversationData::Oz(conversation) => conversation
+            LoadedConversationData::Oz(conversation) => conversation
                 .server_metadata()
                 .and_then(|metadata| metadata.ambient_agent_task_id),
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 cli_conversation.metadata.ambient_agent_task_id
             }
         };
@@ -3615,7 +3615,7 @@ impl PaneGroup {
         }
 
         match cloud_conversation {
-            CloudConversationData::Oz(conversation) => {
+            LoadedConversationData::Oz(conversation) => {
                 terminal_view.update(ctx, |view, ctx| {
                     view.restore_conversation_after_view_creation(
                         RestoredAIConversation::new(*conversation),
@@ -3624,7 +3624,7 @@ impl PaneGroup {
                     );
                 });
             }
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 if !FeatureFlag::AgentHarness.is_enabled() {
                     log::warn!("AgentHarness flag is disabled; ignoring CLI agent conversation");
                     return;
@@ -3637,7 +3637,7 @@ impl PaneGroup {
                 };
                 terminal_view.update(ctx, |view, ctx| {
                     view.restore_conversation_and_directory_context(
-                        CloudConversationData::CLIAgent(cli_conversation),
+                        LoadedConversationData::CLIAgent(cli_conversation),
                         true,
                         |_, _| {},
                         ctx,
@@ -5496,18 +5496,18 @@ impl PaneGroup {
     pub fn replace_loading_pane_with_terminal(
         &mut self,
         loading_pane_id: PaneId,
-        cloud_conversation: CloudConversationData,
+        cloud_conversation: LoadedConversationData,
         ctx: &mut ViewContext<Self>,
     ) -> bool {
         let restoration = match cloud_conversation {
-            CloudConversationData::Oz(conversation) => {
+            LoadedConversationData::Oz(conversation) => {
                 ConversationRestorationInNewPaneType::Historical {
                     conversation: *conversation,
                     should_use_live_appearance: true,
                     ambient_agent_task_id: None,
                 }
             }
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 if !FeatureFlag::AgentHarness.is_enabled() {
                     log::warn!("AgentHarness flag is disabled; ignoring CLI agent conversation");
                     return false;

@@ -29,14 +29,13 @@ pub struct CLIAgentConversation {
     pub block: SerializedBlock,
 }
 
-/// Representation of the conversation data that can be fetched from cloud storage.
+/// 已加载的本地会话数据表示。
 ///
-/// The exact format depends on the agent harness that produced the conversation.
-pub enum CloudConversationData {
-    /// A conversation produced by the Oz harness, which we can materialize into the
-    /// [`AIConversation`] data model.
+/// 具体格式取决于生成该会话的 agent harness。
+pub enum LoadedConversationData {
+    /// 由 Oz harness 生成、可还原为 [`AIConversation`] 数据模型的会话。
     Oz(Box<AIConversation>),
-    /// A conversation produced by an external CLI agent harness.
+    /// 由外部 CLI agent harness 生成的会话。
     CLIAgent(Box<CLIAgentConversation>),
 }
 
@@ -86,9 +85,9 @@ pub fn convert_persisted_conversation_to_ai_conversation_with_metadata(
 
 /// Boxes a future with the right type for the platform.
 /// On WASM, futures must not implement Send.
-fn box_future<F>(f: F) -> warpui::r#async::BoxFuture<'static, Option<CloudConversationData>>
+fn box_future<F>(f: F) -> warpui::r#async::BoxFuture<'static, Option<LoadedConversationData>>
 where
-    F: Future<Output = Option<CloudConversationData>> + warpui::r#async::Spawnable,
+    F: Future<Output = Option<LoadedConversationData>> + warpui::r#async::Spawnable,
 {
     cfg_if::cfg_if! {
         if #[cfg(target_family = "wasm")] {
@@ -111,10 +110,10 @@ impl BlocklistAIHistoryModel {
     pub fn load_conversation_data(
         &self,
         conversation_id: AIConversationId,
-    ) -> warpui::r#async::BoxFuture<'static, Option<CloudConversationData>> {
+    ) -> warpui::r#async::BoxFuture<'static, Option<LoadedConversationData>> {
         // First check if the conversation is already in memory
         if let Some(conversation) = self.conversations_by_id.get(&conversation_id) {
-            return box_future(futures::future::ready(Some(CloudConversationData::Oz(
+            return box_future(futures::future::ready(Some(LoadedConversationData::Oz(
                 Box::new(conversation.clone()),
             ))));
         }
@@ -133,7 +132,7 @@ impl BlocklistAIHistoryModel {
             // Load from local database synchronously
             let result = self
                 .load_conversation_from_db(&conversation_id)
-                .map(|c| CloudConversationData::Oz(Box::new(c)));
+                .map(|c| LoadedConversationData::Oz(Box::new(c)));
             box_future(futures::future::ready(result))
         } else {
             log::warn!("Cannot load conversation {conversation_id}: no local data");
