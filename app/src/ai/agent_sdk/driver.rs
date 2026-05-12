@@ -1365,11 +1365,11 @@ impl AgentDriver {
                                     skills.len()
                                 );
                             }
-                            SkillManager::handle(ctx).update(ctx, |manager, _| {
+                            SkillManager::handle(ctx).update(ctx, |manager, ctx| {
                                 // All repo skills should be in scope regardless of cwd when
                                 // a cloud environment is configured.
                                 manager.set_cloud_environment(true);
-                                manager.handle_skills_added(skills);
+                                manager.handle_skills_added(skills, ctx);
                             });
                         })
                         .await;

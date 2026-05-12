@@ -73,6 +73,7 @@ mod search_bar;
 mod server;
 mod session_management;
 mod shell_indicator;
+mod skill_manager;
 mod ssh_manager;
 mod suggestions;
 mod system;

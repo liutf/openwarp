@@ -299,6 +299,7 @@ pub enum LeftPanelDisplayedTab {
     WarpDrive,
     ConversationListView,
     SshManager,
+    SkillManager,
 }
 
 impl From<ToolPanelView> for LeftPanelDisplayedTab {
@@ -309,6 +310,7 @@ impl From<ToolPanelView> for LeftPanelDisplayedTab {
             ToolPanelView::WarpDrive => LeftPanelDisplayedTab::WarpDrive,
             ToolPanelView::ConversationListView => LeftPanelDisplayedTab::ConversationListView,
             ToolPanelView::SshManager => LeftPanelDisplayedTab::SshManager,
+            ToolPanelView::SkillManager => LeftPanelDisplayedTab::SkillManager,
         }
     }
 }

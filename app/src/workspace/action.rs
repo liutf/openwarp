@@ -150,6 +150,8 @@ pub enum WorkspaceAction {
     },
     /// 打开/关闭左侧 panel 的 SSH 管理器视图(openWarp 独有)。
     ToggleSshManager,
+    /// 打开/关闭左侧 panel 的 Skill 管理器视图(openWarp 独有)。
+    ToggleSkillManager,
     AddTabWithShell {
         shell: AvailableShell,
         source: AddTabWithShellSource,
@@ -722,6 +724,7 @@ impl WorkspaceAction {
             | AddTerminalTab { .. }
             | OpenSshTerminal { .. }
             | ToggleSshManager
+            | ToggleSkillManager
             | AddTabWithShell { .. }
             | AddGetStartedTab
             | AddAgentTab
