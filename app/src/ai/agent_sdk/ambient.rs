@@ -50,8 +50,6 @@ use crate::ai::agent_sdk::driver::attachments::{
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::server::ids::{ServerId, SyncId};
 
-use super::common::{EnvironmentChoice, ResolveConfigurationError};
-
 const MAX_LINE_WIDTH: usize = 90;
 const STREAM_RETRY_BACKOFF_STEPS: &[u64] = &[1, 2, 5, 10];
 
@@ -118,7 +116,7 @@ pub(super) fn filter_from_args(args: &ListTasksArgs) -> TaskListFilter {
         states,
         source: args.source.map(run_source_from_arg),
         execution_location: args.execution_location.map(execution_location_from_arg),
-        environment_id: args.environment.clone(),
+        environment_id: None,
         skill_spec: args.skill.clone(),
         schedule_id: args.schedule.clone(),
         ancestor_run_id: args.ancestor_run.clone(),
@@ -370,32 +368,8 @@ impl AmbientAgentRunner {
                 vec![]
             };
 
-            let mut environment_args = args.environment;
-            if environment_args.environment.is_none() && !environment_args.no_environment {
-                if let Some(environment_id) = loaded_file
-                    .as_ref()
-                    .and_then(|f| f.file.environment_id.clone())
-                {
-                    environment_args.environment = Some(environment_id);
-                }
-            }
+            let environment_id = None;
 
-            let environment_id = match EnvironmentChoice::resolve_for_create(environment_args, ctx)
-            {
-                Ok(EnvironmentChoice::None) => {
-                    eprintln!("Agent will run without an environment.");
-                    None
-                },
-                Ok(EnvironmentChoice::Environment { id, .. }) => Some(id),
-                Err(ResolveConfigurationError::Canceled) => {
-                    ctx.terminate_app(TerminationMode::ForceTerminate, None);
-                    return;
-                }
-                Err(err) => {
-                    super::report_fatal_error(anyhow::anyhow!(err), ctx);
-                    return;
-                }
-            };
 
             let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
 

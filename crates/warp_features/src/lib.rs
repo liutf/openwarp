@@ -880,7 +880,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::GeminiNotifications,
     FeatureFlag::LocalDockerSandbox,
     FeatureFlag::VerticalTabsSummaryMode,
-    FeatureFlag::CloudModeSetupV2,
+    // OpenWarp Wave 7-2:`CloudModeSetupV2` 随 cloud ambient agent 主体物理删。
     FeatureFlag::ConfigurableContextWindow,
     FeatureFlag::DragTabsToWindows,
 ];

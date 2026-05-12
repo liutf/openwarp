@@ -1549,7 +1549,8 @@ fn initialize_app(
     ai::blocklist::block::status_bar::init(ctx);
     drive::index::init(ctx);
     ai_assistant::panel::init(ctx);
-    settings_view::update_environment_form::init(ctx);
+    // OpenWarp Wave 7-2:`settings_view::update_environment_form::init` 随 cloud ambient agent
+    // 主体子系统物理删。
     env_vars::env_var_collection_block::init(ctx);
     terminal::ssh::install_tmux::init(ctx);
     terminal::ssh::warpify::init(ctx);
@@ -2423,9 +2424,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::IntegrationCommand,
         #[cfg(feature = "artifact_command")]
         FeatureFlag::ArtifactCommand,
-        // OpenWarp(本地化,Phase 3c-2):CloudEnvironments 下柜。导致 `warp environment`
-        // 子命令拒绝执行与隐藏,且 `warp agent run --environment` 参数不可用。
-        // 本地 harness 运行不依赖云端 environment。
+        // OpenWarp Wave 7-2:`CloudEnvironments` FeatureFlag 随 cloud ambient agent 主体子系统
+        // 物理删 —— `warp environment` 子命令 + `--environment` 参数同步下线。
         #[cfg(all(feature = "simulate_github_unauthed", debug_assertions))]
         FeatureFlag::SimulateGithubUnauthed,
         #[cfg(feature = "session_sharing_acls")]
@@ -2697,12 +2697,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::InlineHistoryMenu,
         #[cfg(feature = "inline_repo_menu")]
         FeatureFlag::InlineRepoMenu,
-        #[cfg(feature = "cloud_mode")]
-        FeatureFlag::CloudMode,
-        #[cfg(feature = "cloud_mode_from_local_session")]
-        FeatureFlag::CloudModeFromLocalSession,
-        #[cfg(feature = "cloud_mode_image_context")]
-        FeatureFlag::CloudModeImageContext,
+        // OpenWarp Wave 7-2:`CloudMode` / `CloudModeFromLocalSession` / `CloudModeImageContext`
+        // 随 cloud ambient agent 主体子系统物理删。
         #[cfg(feature = "summarization_via_message_replacement")]
         FeatureFlag::SummarizationViaMessageReplacement,
         #[cfg(feature = "pluggable_notifications")]
@@ -2787,10 +2783,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::CodexNotifications,
         #[cfg(feature = "trim_trailing_blank_lines")]
         FeatureFlag::TrimTrailingBlankLines,
-        #[cfg(feature = "cloud_mode_setup_v2")]
-        FeatureFlag::CloudModeSetupV2,
-        #[cfg(feature = "cloud_mode_input_v2")]
-        FeatureFlag::CloudModeInputV2,
+        // OpenWarp Wave 7-2:`CloudModeSetupV2` / `CloudModeInputV2` 随 cloud ambient agent
+        // 主体子系统物理删。
         #[cfg(feature = "configurable_context_window")]
         FeatureFlag::ConfigurableContextWindow,
     ];

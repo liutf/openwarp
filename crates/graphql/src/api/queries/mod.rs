@@ -21,8 +21,9 @@
 // `ManagedSecretsClient impl for ServerApi` 已 stub 为 `Ok(empty)`。
 // `task_secrets` query 文件保留:其内嵌的 `ManagedSecretValue` enum 仍被
 // `crates/managed_secrets` 与 `app/src/ai/agent_sdk` 多处作为 BYOP 类型 import。
+// OpenWarp Wave 7-2:`list_warp_dev_images` query 随 cloud ambient agent 主体子系统物理删 ——
+// 唯一消费方 `agent_sdk/environment.rs` 已与 `cloud_environments` 一同下线。
 pub mod get_oauth_connect_tx_status;
 pub mod get_updated_cloud_objects;
 pub mod get_workspaces_metadata_for_user;
-pub mod list_warp_dev_images;
 pub mod task_secrets;

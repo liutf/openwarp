@@ -4,7 +4,7 @@ use std::ffi::OsString;
 
 use crate::agent::{AgentCommand, Harness, OutputFormat};
 use crate::artifact::ArtifactCommand;
-use crate::environment::{EnvironmentCommand, ImageCommand};
+// OpenWarp Wave 7-2:`environment` CLI 随 cloud ambient agent 主体物理删。
 use crate::harness_support::{HarnessSupportCommand, TaskStatus};
 use crate::integration::IntegrationCommand;
 use crate::task::{MessageCommand, TaskCommand};
@@ -880,157 +880,9 @@ fn integration_update_accepts_mcp_json_and_remove_mcp() {
     assert_eq!(args.remove_mcp, vec!["existing".to_string()]);
 }
 
-#[test]
-fn environment_image_list_parses() {
-    let args = Args::try_parse_from(["warp", "environment", "image", "list"]).unwrap();
-
-    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
-        panic!("Expected `warp environment image list` command");
-    };
-    let CliCommand::Environment(EnvironmentCommand::Image(image_cmd)) = boxed_cmd.as_ref() else {
-        panic!("Expected `warp environment image` command");
-    };
-
-    assert!(matches!(image_cmd, ImageCommand::List));
-}
-
-#[test]
-fn environment_create_accepts_description() {
-    let args = Args::try_parse_from([
-        "warp",
-        "environment",
-        "create",
-        "--name",
-        "test-env",
-        "--description",
-        "A test environment",
-        "--docker-image",
-        "ubuntu:latest",
-    ])
-    .unwrap();
-
-    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
-        panic!("Expected `warp environment create` command");
-    };
-    let CliCommand::Environment(EnvironmentCommand::Create {
-        name,
-        description,
-        docker_image,
-        ..
-    }) = boxed_cmd.as_ref()
-    else {
-        panic!("Expected `warp environment create` command");
-    };
-
-    assert_eq!(name, "test-env");
-    assert_eq!(description.as_deref(), Some("A test environment"));
-    assert_eq!(docker_image.as_deref(), Some("ubuntu:latest"));
-}
-
-#[test]
-fn environment_create_description_max_length() {
-    // 240 characters should be accepted
-    let valid_description = "a".repeat(240);
-    let args = Args::try_parse_from([
-        "warp",
-        "environment",
-        "create",
-        "--name",
-        "test-env",
-        "--description",
-        &valid_description,
-        "--docker-image",
-        "ubuntu:latest",
-    ])
-    .unwrap();
-
-    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
-        panic!("Expected `warp environment create` command");
-    };
-    let CliCommand::Environment(EnvironmentCommand::Create { description, .. }) =
-        boxed_cmd.as_ref()
-    else {
-        panic!("Expected `warp environment create` command");
-    };
-
-    assert_eq!(description.as_deref(), Some(valid_description.as_str()));
-
-    // 241 characters should be rejected
-    let invalid_description = "a".repeat(241);
-    assert!(
-        Args::try_parse_from([
-            "warp",
-            "environment",
-            "create",
-            "--name",
-            "test-env",
-            "--description",
-            &invalid_description,
-            "--docker-image",
-            "ubuntu:latest",
-        ])
-        .is_err()
-    );
-}
-
-#[test]
-fn environment_update_accepts_description() {
-    let args = Args::try_parse_from([
-        "warp",
-        "environment",
-        "update",
-        "env-id",
-        "--description",
-        "Updated description",
-    ])
-    .unwrap();
-
-    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
-        panic!("Expected `warp environment update` command");
-    };
-    let CliCommand::Environment(EnvironmentCommand::Update {
-        id,
-        description,
-        remove_description,
-        ..
-    }) = boxed_cmd.as_ref()
-    else {
-        panic!("Expected `warp environment update` command");
-    };
-
-    assert_eq!(id, "env-id");
-    assert_eq!(description.as_deref(), Some("Updated description"));
-    assert!(!remove_description);
-}
-
-#[test]
-fn environment_update_accepts_remove_description() {
-    let args = Args::try_parse_from([
-        "warp",
-        "environment",
-        "update",
-        "env-id",
-        "--remove-description",
-    ])
-    .unwrap();
-
-    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
-        panic!("Expected `warp environment update` command");
-    };
-    let CliCommand::Environment(EnvironmentCommand::Update {
-        id,
-        description,
-        remove_description,
-        ..
-    }) = boxed_cmd.as_ref()
-    else {
-        panic!("Expected `warp environment update` command");
-    };
-
-    assert_eq!(id, "env-id");
-    assert!(description.is_none());
-    assert!(remove_description);
-}
+// OpenWarp Wave 7-2:environment_image_list_parses / environment_create_accepts_description /
+// environment_create_description_max_length / environment_update_accepts_description /
+// environment_update_accepts_remove_description 随 cloud ambient agent 主体子系统物理删。
 
 #[test]
 fn agent_run_accepts_computer_use_flag() {

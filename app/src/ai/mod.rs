@@ -37,6 +37,8 @@ use warpui::AppContext;
 #[cfg(not(target_family = "wasm"))]
 pub mod agent_sdk;
 // OpenWarp Wave 7-3:`cloud_agent_settings` 随 Cloud Mode UI 子系统物理删。
+// OpenWarp Wave 7-2:Cloud environments 的 CLI / 表单 / 环境准备链路已删；
+// 本地对象数据类型仍暂存于此，供 CloudModel 反序列化与现有视图过滤使用。
 pub mod cloud_environments;
 pub mod execution_profiles;
 pub mod facts;

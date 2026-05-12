@@ -95,10 +95,8 @@ mod teams_page;
 // OpenWarp Wave 7-3:`telemetry` 随唯一 variant `EnvironmentsPageOpened` (Cloud Mode UI)
 // 一同物理删。
 mod transfer_ownership_confirmation_modal;
-// OpenWarp Wave 7-3:`update_environment_form` 留在原处 —— `terminal::view::ambient_agent::first_time_setup`
-// 还在引用它的 `UpdateEnvironmentForm` 类型;后续 Cloud Mode UI 大手术 commit 中随
-// `ambient_agent/` 一同物理删。
-pub mod update_environment_form;
+// OpenWarp Wave 7-2:`update_environment_form` 随 cloud ambient agent 主体物理删 ——
+// `terminal::view::ambient_agent::first_time_setup` 与 `cloud_environments` 一同下线。
 mod warp_drive_page;
 mod warpify_page;
 

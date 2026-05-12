@@ -16,7 +16,7 @@ use std::{
 
 use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::ai::mcp::MCPServerState;
-use crate::ai::skills::{SkillManager, SkillWatcher};
+
 use crate::ai::{
     agent::conversation::AIConversationId,
     agent_sdk::driver::harness::{
@@ -42,7 +42,6 @@ use crate::{
             agent_view::AgentViewEntryOrigin, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
             BlocklistAIPermissions,
         },
-        cloud_environments::{AmbientAgentEnvironment, CloudAmbientAgentEnvironment},
         execution_profiles::profiles::AIExecutionProfilesModel,
         mcp::{
             file_based_manager::{FileBasedMCPManager, FileBasedMCPManagerEvent},
@@ -52,7 +51,6 @@ use crate::{
         },
     },
     auth::AuthStateProvider,
-    cloud_object::CloudObject,
     server::{
         ids::{ServerId, SyncId},
         server_api::{
@@ -82,19 +80,16 @@ use warp_graphql::ai::AgentTaskState;
 use warp_managed_secrets::ManagedSecretValue;
 use warpui::{
     r#async::{FutureExt, TimeoutError},
-    AppContext, Entity, ModelContext, ModelHandle, ModelSpawner, SingletonEntity,
+    Entity, ModelContext, ModelHandle, ModelSpawner, SingletonEntity,
 };
 
 pub(crate) mod attachments;
-pub(crate) mod cloud_provider;
-pub(crate) mod environment;
 mod error_classification;
 pub(crate) mod harness;
 pub(super) mod output;
 mod snapshot;
 pub(crate) mod terminal;
 
-use environment::PrepareEnvironmentError;
 use terminal::TerminalDriverEvent;
 
 const MCP_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -222,10 +217,6 @@ pub struct AgentDriverOptions {
     /// determines which harness-specific path is taken (Oz transcript restore vs.
     /// third-party-harness payload rehydration).
     pub resume: Option<ResumeOptions>,
-    /// Cloud providers to configure within the agent's session.
-    pub cloud_providers: Vec<Box<dyn cloud_provider::CloudProvider>>,
-    /// Resolved environment configuration, if any.
-    pub environment: Option<AmbientAgentEnvironment>,
     /// Selected execution harness for this run.
     pub selected_harness: Harness,
     /// Whether to skip end-of-run snapshot upload.
@@ -265,12 +256,6 @@ pub struct AgentDriver {
 
     // The conversation ID to continue (if provided).
     restored_conversation_id: Option<AIConversationId>,
-
-    /// Cloud providers set up within this driver session.
-    cloud_providers: Vec<Box<dyn cloud_provider::CloudProvider>>,
-
-    /// Resolved environment configuration.
-    environment: Option<AmbientAgentEnvironment>,
 
     // End-of-run snapshot upload controls.
     snapshot_disabled: bool,
@@ -373,8 +358,7 @@ pub enum AgentDriverError {
     EnvironmentNotFound(String),
     #[error("Environment setup failed: {0}")]
     EnvironmentSetupFailed(String),
-    #[error("Cloud provider setup failed")]
-    CloudProviderSetupFailed(#[from] cloud_provider::CloudProviderSetupError),
+
     #[error("Could not resolve working directory {}", path.display())]
     InvalidWorkingDirectory {
         path: PathBuf,
@@ -445,16 +429,6 @@ impl From<warpui::ModelDropped> for AgentDriverError {
     }
 }
 
-impl From<PrepareEnvironmentError> for AgentDriverError {
-    fn from(error: PrepareEnvironmentError) -> Self {
-        match error {
-            PrepareEnvironmentError::InvalidRuntimeState => AgentDriverError::InvalidRuntimeState,
-            PrepareEnvironmentError::TerminalDriver { source } => source,
-            error => AgentDriverError::EnvironmentSetupFailed(error.to_string()),
-        }
-    }
-}
-
 impl AgentDriver {
     pub fn new(
         options: AgentDriverOptions,
@@ -468,8 +442,6 @@ impl AgentDriver {
             idle_on_complete,
             secrets,
             resume,
-            cloud_providers,
-            environment,
             selected_harness,
             snapshot_disabled,
             snapshot_upload_timeout,
@@ -584,8 +556,6 @@ impl AgentDriver {
             env_vars.insert(OsString::from(env_name), OsString::from(env_value));
         }
 
-        // Inject cloud provider env vars.
-        cloud_provider::collect_env_vars(&cloud_providers, &mut env_vars)?;
         env_vars.extend(task_env_vars(
             task_id.as_ref(),
             parent_run_id.as_deref(),
@@ -623,8 +593,6 @@ impl AgentDriver {
             harness: None,
             idle_on_complete,
             restored_conversation_id,
-            cloud_providers,
-            environment,
             snapshot_disabled: snapshot_disabled.unwrap_or(false),
             snapshot_upload_timeout: snapshot_upload_timeout
                 .unwrap_or(snapshot::DEFAULT_SNAPSHOT_UPLOAD_TIMEOUT),
@@ -691,8 +659,6 @@ impl AgentDriver {
                 if tx.send(result).is_err() {
                     log::error!("Caller did not wait for agent driver to finish");
                 }
-
-                Self::cleanup(foreground).await;
             },
             |_, _, _| {},
         );
@@ -732,19 +698,6 @@ impl AgentDriver {
             }
 
             result
-        }
-    }
-
-    /// Log all valid environment IDs for the user.
-    pub(super) fn log_valid_environments(app: &AppContext) {
-        let environments = CloudAmbientAgentEnvironment::get_all(app);
-        if environments.is_empty() {
-            log::error!("No environments available for this user.");
-        } else {
-            log::error!("Valid environment IDs:");
-            for env in environments {
-                log::error!("  - {} ({})", env.sync_id(), env.model().string_model.name);
-            }
         }
     }
 
@@ -1202,10 +1155,6 @@ impl AgentDriver {
             .await?
             .await?;
 
-        // Once the terminal session is bootstrapped, perform cloud provider setup before spawning MCP servers.
-        // MCP servers *may* rely on cloud provider credentials.
-        Self::setup_cloud_providers(&foreground).await?;
-
         // For the Oz harness only: set up MCP servers, model overrides, and profile information.
         if matches!(task.harness, HarnessKind::Oz) {
             // Resolve MCP specs into existing server UUIDs and ephemeral installations.
@@ -1254,7 +1203,8 @@ impl AgentDriver {
                 .await?;
         }
 
-        // For all harnesses: wait for the shared session and prepare the environment.
+        // For all harnesses: wait for the shared session. OpenWarp Wave 7-2 已下线云端
+        // environment 准备链路；本地 BYOP 运行只保留工作目录、MCP、模型/Profile 与 harness 启动流程。
         foreground
             .spawn(|me, ctx| {
                 me.terminal_driver
@@ -1262,125 +1212,6 @@ impl AgentDriver {
             })
             .await?
             .await?;
-
-        let environment_opt = foreground.spawn(|me, _| me.environment.clone()).await?;
-
-        if let Some(environment) = environment_opt {
-            log::info!("Loading environment...");
-            let environment_github_repos = environment.github_repos.clone();
-
-            // Subscribe to file-based MCP discovery BEFORE prepare_environment triggers the
-            // pipeline so no CloudEnvMcpScanComplete events are missed.
-            //
-            // File-based MCP discovery is Oz-only.
-            // TODO(REMOTE-1345): handle MCP setup for third-party harnesses.
-            let file_based_discovery_rx = match &task.harness {
-                HarnessKind::Oz => {
-                    let github_repos = environment_github_repos.clone();
-                    Some(
-                        foreground
-                            .spawn(move |me, ctx| {
-                                let expected_repo_paths: Vec<PathBuf> = github_repos
-                                    .iter()
-                                    .map(|repo| me.working_dir.join(&repo.repo))
-                                    .collect();
-                                me.setup_file_based_mcp_discovery(expected_repo_paths, ctx)
-                            })
-                            .await?,
-                    )
-                }
-                HarnessKind::ThirdParty(_) | HarnessKind::Unsupported(_) => None,
-            };
-
-            let harness = task.harness.harness();
-            foreground
-                .spawn(move |me, ctx| {
-                    let working_dir = me.working_dir.clone();
-                    me.terminal_driver.update(ctx, |_, ctx| {
-                        environment::prepare_environment(
-                            environment,
-                            working_dir,
-                            false, /* is_sandbox */
-                            harness,
-                            ctx,
-                        )
-                    })
-                })
-                .await?
-                .await
-                .map_err(AgentDriverError::from)?;
-
-            if let Some(file_based_discovery_rx) = file_based_discovery_rx {
-                // Await discovery: collect UUIDs of file-based MCP servers found in cloned repos.
-                let discovered_uuids = match file_based_discovery_rx
-                    .with_timeout(MCP_SERVER_STARTUP_TIMEOUT)
-                    .await
-                {
-                    Ok(Ok(uuids)) => uuids,
-                    Ok(Err(Canceled)) => {
-                        log::warn!(
-                            "File-based MCP discovery subscription dropped early; proceeding without"
-                        );
-                        vec![]
-                    }
-                    Err(TimeoutError) => {
-                        log::warn!(
-                            "Timed out waiting for file-based MCP servers to be parsed; proceeding without"
-                        );
-                        vec![]
-                    }
-                };
-
-                // Wait for discovered servers to reach Running (non-fatal: always unblocks).
-                if !discovered_uuids.is_empty() {
-                    log::info!(
-                        "Waiting for {} file-based MCP server(s) to reach a terminal state",
-                        discovered_uuids.len()
-                    );
-                    foreground
-                        .spawn(move |me, ctx| {
-                            me.wait_for_file_based_mcps_running(discovered_uuids, ctx)
-                        })
-                        .await?
-                        .await;
-                }
-            }
-
-            // Skill loading is Oz-only; third-party harnesses have their own skill systems.
-            match &task.harness {
-                HarnessKind::Oz => {
-                    // Load skills from environment repos synchronously so the initial
-                    // message includes them. File trees are ready after prepare_environment.
-                    let github_repos = environment_github_repos.clone();
-                    let load_skills_result = foreground
-                        .spawn(move |me, ctx| {
-                            let repo_paths: Vec<PathBuf> = github_repos
-                                .iter()
-                                .map(|repo| me.working_dir.join(&repo.repo))
-                                .collect();
-                            let skills = SkillWatcher::read_skills_for_repos(&repo_paths, ctx);
-                            if !skills.is_empty() {
-                                log::info!(
-                                    "Loaded {} skill(s) from environment repos",
-                                    skills.len()
-                                );
-                            }
-                            SkillManager::handle(ctx).update(ctx, |manager, _| {
-                                // All repo skills should be in scope regardless of cwd when
-                                // a cloud environment is configured.
-                                manager.set_cloud_environment(true);
-                                manager.handle_skills_added(skills);
-                            });
-                        })
-                        .await;
-
-                    if let Err(err) = load_skills_result {
-                        log::warn!("Failed to load environment repo skills: {err}");
-                    }
-                }
-                HarnessKind::ThirdParty(_) | HarnessKind::Unsupported(_) => {}
-            }
-        }
 
         // Run the harness with a prompt
         match task.harness {
@@ -2072,62 +1903,6 @@ impl AgentDriver {
                         |_, _, _| {},
                     );
                 }
-            }
-        }
-    }
-
-    /// Set up each cloud provider in sequence.
-    async fn setup_cloud_providers(spawner: &ModelSpawner<Self>) -> Result<(), AgentDriverError> {
-        let (mut providers, terminal_spawner) = spawner
-            .spawn(|me, ctx| {
-                let terminal_spawner = me.terminal_driver.update(ctx, |_, ctx| ctx.spawner());
-                // Temporarily take all cloud providers so we can move them onto the background thread.
-                //
-                // Since the Vec of cloud providers is owned by the AgentDriver model, which is
-                // itself owned by the UI framework, we can only mutate them in-place on the UI thread.
-                // So that `CloudProvider::setup` can be `async` _and_ take `&mut self`, the
-                // `setup_cloud_providers` future takes ownership of all the providers, and then moves
-                // them back to the UI thread. This is somewhat similar to how views and models are removed
-                // from the UI framework temporarily while being mutated.
-                let providers = std::mem::take(&mut me.cloud_providers);
-                (providers, terminal_spawner)
-            })
-            .await?;
-
-        let mut result = Ok(());
-
-        for provider in providers.iter_mut() {
-            let provider_result = provider.setup(terminal_spawner.clone()).await;
-            if provider_result.is_err() {
-                result = provider_result;
-                break;
-            }
-        }
-
-        // Restore the cloud providers.
-        spawner
-            .spawn(move |me, _| {
-                me.cloud_providers = providers;
-            })
-            .await?;
-
-        result?;
-        Ok(())
-    }
-
-    /// Perform cleanup after the agent has finished running.
-    async fn cleanup(spawner: ModelSpawner<Self>) {
-        let Ok(providers) = spawner
-            .spawn(|me, _| std::mem::take(&mut me.cloud_providers))
-            .await
-        else {
-            log::error!("Unable to retrieve cloud providers for cleanup");
-            return;
-        };
-
-        for provider in providers {
-            if let Err(err) = provider.cleanup().await {
-                report_error!(anyhow!(err).context("Unable to clean up cloud provider"));
             }
         }
     }
