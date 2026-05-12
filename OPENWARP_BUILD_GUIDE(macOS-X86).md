@@ -72,7 +72,7 @@ rustup target add aarch64-apple-darwin
 
 ```bash
 cd ~
-git clone https://github.com/zerx-lab/warp.git openwarp
+git clone https://github.com/liutf/openwarp.git openwarp
 cd openwarp
 ```
 
