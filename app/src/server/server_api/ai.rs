@@ -280,22 +280,6 @@ pub struct PrepareAttachmentUploadsRequest {
     pub files: Vec<AttachmentFileInfo>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DownloadAttachmentsRequest {
-    pub attachment_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct AttachmentDownloadInfo {
-    pub attachment_id: String,
-    pub download_url: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct DownloadAttachmentsResponse {
-    pub attachments: Vec<AttachmentDownloadInfo>,
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct HandoffSnapshotAttachmentInfo {
     pub attachment_id: String,
@@ -650,12 +634,6 @@ pub trait AIClient: 'static + Send + Sync {
         files: &[AttachmentFileInfo],
     ) -> anyhow::Result<PrepareAttachmentUploadsResponse, anyhow::Error>;
 
-    async fn download_task_attachments(
-        &self,
-        task_id: &AmbientAgentTaskId,
-        attachment_ids: &[String],
-    ) -> anyhow::Result<DownloadAttachmentsResponse, anyhow::Error>;
-
     async fn get_handoff_snapshot_attachments(
         &self,
         task_id: &AmbientAgentTaskId,
@@ -807,14 +785,6 @@ impl AIClient for LocalAIClient {
         _files: &[AttachmentFileInfo],
     ) -> anyhow::Result<PrepareAttachmentUploadsResponse, anyhow::Error> {
         Err(disabled_ai_client_method("prepare_attachments_for_upload"))
-    }
-
-    async fn download_task_attachments(
-        &self,
-        _task_id: &AmbientAgentTaskId,
-        _attachment_ids: &[String],
-    ) -> anyhow::Result<DownloadAttachmentsResponse, anyhow::Error> {
-        Err(disabled_ai_client_method("download_task_attachments"))
     }
 
     async fn get_handoff_snapshot_attachments(
