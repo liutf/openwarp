@@ -136,6 +136,9 @@ const COMMANDS_COUNT_LIMIT: i64 = 10000;
 use warp_server_client::persistence::{upsert_cloud_object, CloudObjectId};
 
 const WARP_SQLITE_FILE_NAME: &str = "warp.sqlite";
+const OPENWARP_APP_GROUP_SQLITE_MIGRATION_MARKER: &str = ".openwarp-app-group-sqlite-migrated";
+#[cfg(target_os = "macos")]
+const WARP_APP_GROUP_ID: &str = "2BBY89MBSN.dev.warp";
 
 /// When delete a cloud object, this callback is used to delete the cloud
 /// object. It takes the id of the cloud object to delete as a parameter.
@@ -468,6 +471,18 @@ pub(super) fn init_db() -> Result<SqliteConnection> {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    if warp_core::channel::ChannelState::channel() == warp_core::channel::Channel::Oss {
+        if let Some(legacy_dir) = openwarp_legacy_app_group_sqlite_dir() {
+            if let Err(err) = migrate_openwarp_app_group_sqlite_if_needed(&db_path, &legacy_dir)
+                .context("Failed to migrate OpenWarp SQLite database out of legacy App Group")
+            {
+                report_error!(err);
+                log::warn!("Skipping legacy App Group SQLite migration and continuing startup");
+            }
+        }
+    }
+
     // Migrate old SQLite files into the secure application container.
     let old_db_path = warp_core::paths::state_dir().join(WARP_SQLITE_FILE_NAME);
     if old_db_path != db_path && old_db_path.exists() && !db_path.exists() {
@@ -510,6 +525,123 @@ pub(super) fn init_db() -> Result<SqliteConnection> {
     }
 
     setup_database(&database_file_path())
+}
+
+#[cfg(target_os = "macos")]
+fn openwarp_legacy_app_group_sqlite_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|home_dir| {
+        home_dir
+            .join("Library/Group Containers")
+            .join(WARP_APP_GROUP_ID)
+            .join("Library/Application Support")
+            .join(warp_core::channel::ChannelState::app_id().to_string())
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn migrate_openwarp_app_group_sqlite_if_needed(target_db: &Path, legacy_dir: &Path) -> Result<()> {
+    let Some(target_dir) = target_db.parent() else {
+        return Ok(());
+    };
+
+    let marker = target_dir.join(OPENWARP_APP_GROUP_SQLITE_MIGRATION_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+
+    let legacy_db = legacy_dir.join(WARP_SQLITE_FILE_NAME);
+    if !legacy_db.exists() {
+        write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+        return Ok(());
+    }
+
+    if !should_copy_legacy_openwarp_sqlite(&legacy_db, target_db)? {
+        write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(target_dir).with_context(|| {
+        format!(
+            "Failed to create SQLite state directory `{}`",
+            target_dir.display()
+        )
+    })?;
+    copy_sqlite_file(&legacy_db, target_db)?;
+    copy_sqlite_sidecar(&legacy_db, target_db, "sqlite-wal")?;
+    copy_sqlite_sidecar(&legacy_db, target_db, "sqlite-shm")?;
+    write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+
+    safe_info!(
+        safe: ("Migrated OpenWarp SQLite database out of legacy App Group"),
+        full: ("Migrated OpenWarp SQLite database from `{}` to `{}`", legacy_db.display(), target_db.display())
+    );
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn should_copy_legacy_openwarp_sqlite(legacy_db: &Path, target_db: &Path) -> Result<bool> {
+    if !target_db.exists() {
+        return Ok(true);
+    }
+
+    let legacy_modified = latest_sqlite_modified_time(legacy_db)?;
+    let target_modified = latest_sqlite_modified_time(target_db)?;
+
+    Ok(legacy_modified > target_modified)
+}
+
+#[cfg(target_os = "macos")]
+fn latest_sqlite_modified_time(db: &Path) -> Result<std::time::SystemTime> {
+    let mut latest = std::fs::metadata(db)
+        .and_then(|metadata| metadata.modified())
+        .with_context(|| format!("Failed to read modified time for `{}`", db.display()))?;
+
+    for extension in ["sqlite-wal", "sqlite-shm"] {
+        let sidecar = db.with_extension(extension);
+        if !sidecar.exists() {
+            continue;
+        }
+
+        let modified = std::fs::metadata(&sidecar)
+            .and_then(|metadata| metadata.modified())
+            .with_context(|| {
+                format!(
+                    "Failed to read modified time for SQLite sidecar `{}`",
+                    sidecar.display()
+                )
+            })?;
+        latest = latest.max(modified);
+    }
+
+    Ok(latest)
+}
+
+#[cfg(target_os = "macos")]
+fn copy_sqlite_sidecar(legacy_db: &Path, target_db: &Path, extension: &str) -> Result<()> {
+    let legacy_path = legacy_db.with_extension(extension);
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    copy_sqlite_file(&legacy_path, &target_db.with_extension(extension))
+}
+
+#[cfg(target_os = "macos")]
+fn copy_sqlite_file(source: &Path, target: &Path) -> Result<()> {
+    std::fs::copy(source, target).map(|_| ()).with_context(|| {
+        format!(
+            "Failed to copy `{}` to `{}`",
+            source.display(),
+            target.display()
+        )
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn write_openwarp_app_group_sqlite_migration_marker(marker: &Path) -> Result<()> {
+    std::fs::write(marker, b"migrated\n")
+        .with_context(|| format!("Failed to write migration marker `{}`", marker.display()))
 }
 
 /// Creates or connects to the database at `database_path` and runs any migrations.
