@@ -406,49 +406,18 @@ impl AmbientAgentViewModel {
         ctx.emit(AmbientAgentViewModelEvent::EnteredComposingState);
     }
 
-    /// This is used when we join an already-running ambient agent shared session (e.g. from the
-    /// agent management view). We want the ambient agent UI affordances (like the environment
-    /// selector) to be visible even though we did not spawn the agent from this view model.
+    /// 用于加入已在运行的 ambient agent 共享会话。
     pub fn enter_viewing_existing_session(
         &mut self,
         task_id: AmbientAgentTaskId,
         ctx: &mut ModelContext<Self>,
     ) {
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-
-        // Store the task ID for later use
         self.task_id = Some(task_id);
 
         if matches!(self.status, Status::NotAmbientAgent) {
             self.status = Status::AgentRunning;
         }
-
-        // Fetch the task so we can set the correct environment (instead of defaulting to the most
-        // recently-used one) and the correct harness (so non-oz viewers know to use the
-        // queued-prompt / harness-command-started flow).
-        ctx.spawn(
-            async move { ai_client.get_ambient_agent_task(&task_id).await },
-            |me, result, ctx| match result {
-                Ok(task) => {
-                    let snapshot = task.agent_config_snapshot.as_ref();
-                    let environment_id = snapshot
-                        .and_then(|s| s.environment_id.as_deref())
-                        .and_then(|id| ServerId::try_from(id).ok())
-                        .map(SyncId::ServerId);
-                    let harness = snapshot
-                        .and_then(|s| s.harness.as_ref())
-                        .map(|h| h.harness_type)
-                        .unwrap_or(Harness::Oz);
-
-                    me.set_environment_id(environment_id, ctx);
-                    me.set_harness(harness, ctx);
-                }
-                Err(err) => {
-                    log::warn!("Failed to fetch ambient agent task for shared session: {err}");
-                    me.set_environment_id(None, ctx);
-                }
-            },
-        );
+        ctx.notify();
     }
 
     pub fn status(&self) -> &Status {
