@@ -2,13 +2,15 @@ pub mod ai;
 // OpenWarp Wave 3-1:`server_api/auth.rs`(AuthClient trait + impl)整文件物理删,
 // `AuthManager` 改为本地 stub。两个 HTTP header 常量直接迁入本文件,供 ambient agent
 // 路径继续使用(实际运行时永远不命中,因 OpenWarp 已无云端 ambient workload)。
-pub mod block;
+// OpenWarp Wave 6-8:`server_api/block.rs`(BlockClient trait + impl)与
+// `server_api/referral.rs`(ReferralsClient trait + impl)整文件物理删 —— 两个
+// trait 全部 stub Err / 空列表,对应的 `ShowBlocksView` / `ReferralsPageView`
+// 设置页一并移除。
 pub mod harness_support;
 pub mod integrations;
 pub mod managed_secrets;
 pub mod object;
 pub(crate) mod presigned_upload;
-pub mod referral;
 // OpenWarp(Wave 3-2):`team` / `workspace` 两个 client trait 与 impl 已物理删,
 // 在 app/ 外 0 消费,UserWorkspaces / TeamUpdateManager 已在 Phase 5 本地化为 no-op。
 
@@ -16,11 +18,9 @@ use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::auth::AuthState;
 use crate::server::graphql::default_request_options;
 use ai::AIClient;
-use block::BlockClient;
 use channel_versions::ChannelVersions;
 use futures::StreamExt;
 use object::ObjectClient;
-use referral::ReferralsClient;
 use url::Url;
 use warp_core::errors::{register_error, AnyhowErrorExt, ErrorExt};
 use warp_managed_secrets::client::ManagedSecretsClient;
@@ -814,14 +814,8 @@ impl ServerApiProvider {
 
     // OpenWarp Wave 3-1:`get_auth_client()` 随 `AuthClient` trait 一同物理删,
     // 所有外部原调用方改为本地 stub (返回 `AuthToken::NoAuth` / `Ok(())`)。
-
-    pub fn get_referrals_client(&self) -> Arc<dyn ReferralsClient> {
-        self.server_api.clone()
-    }
-
-    pub fn get_block_client(&self) -> Arc<dyn BlockClient> {
-        self.server_api.clone()
-    }
+    // OpenWarp Wave 6-8:`get_referrals_client()` / `get_block_client()` 随对应
+    // trait 与设置页 UI 一同物理删。
 
     pub fn get_ai_client(&self) -> Arc<dyn AIClient> {
         self.server_api.clone()

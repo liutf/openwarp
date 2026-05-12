@@ -1485,20 +1485,8 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
-        EditableBinding::new(
-            "workspace:show_settings_shared_blocks_page",
-            BindingDescription::new(crate::t!(
-                "keybinding-desc-workspace-show-settings-shared-blocks"
-            ))
-            .with_custom_description(
-                bindings::MAC_MENUS_CONTEXT,
-                crate::t!("keybinding-desc-workspace-show-settings-shared-blocks-menu"),
-            ),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::SharedBlocks),
-        )
-        .with_group(bindings::BindingGroup::Settings.as_str())
-        .with_context_predicate(id!("Workspace"))
-        .with_custom_action(CustomAction::ViewSharedBlocks),
+        // OpenWarp Wave 6-8:`workspace:show_settings_shared_blocks_page` keybinding 随
+        // `ShowBlocksView` 设置页与 `CustomAction::ViewSharedBlocks` 一同物理删。
         EditableBinding::new(
             "workspace:show_settings_keyboard_shortcuts_page",
             BindingDescription::new(crate::t!(
@@ -1570,15 +1558,8 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
-        EditableBinding::new(
-            "workspace:show_settings_referrals_page",
-            BindingDescription::new(crate::t!(
-                "keybinding-desc-workspace-show-settings-referrals"
-            )),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::Referrals),
-        )
-        .with_group(bindings::BindingGroup::Settings.as_str())
-        .with_context_predicate(id!("Workspace")),
+        // OpenWarp Wave 6-8:`workspace:show_settings_referrals_page` keybinding 随
+        // `ReferralsPageView` 设置页物理删。
         EditableBinding::new(
             "workspace:show_settings_environments_page",
             BindingDescription::new(crate::t!(
