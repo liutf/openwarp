@@ -234,9 +234,6 @@ pub enum DriveIndexAction {
         cloud_object_type_and_id: CloudObjectTypeAndId,
         new_space: Space,
     },
-    LeaveSharedObject {
-        cloud_object_type_and_id: CloudObjectTypeAndId,
-    },
     OpenCloudObjectNamingDialog {
         space: Space,
         object_type: DriveObjectType,
@@ -3205,24 +3202,6 @@ impl DriveIndex {
         ctx.notify();
     }
 
-    fn leave_object(
-        &mut self,
-        cloud_object_type_and_id: &CloudObjectTypeAndId,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let Some(server_id) = cloud_object_type_and_id.server_id() else {
-            return;
-        };
-
-        UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
-            update_manager.leave_object(server_id, ctx);
-        });
-
-        // Reflect the removed objects.
-        self.initialize_section_states(ctx);
-        ctx.notify();
-    }
-
     /// If the given space is tied to a section in warp drive, ensures that that section is open.
     fn open_section_of_space(&mut self, space: Space) {
         if let Some(target_section) = self
@@ -4352,16 +4331,8 @@ impl DriveIndex {
                 );
 
                 if let Some(object) = object {
-                    if FeatureFlag::SharedWithMe.is_enabled() && object.can_leave(app) {
-                        menu_items.push(
-                            MenuItemFields::new(crate::t!("drive-remove"))
-                                .with_on_select_action(DriveIndexAction::LeaveSharedObject {
-                                    cloud_object_type_and_id: *cloud_object_type_and_id,
-                                })
-                                .with_icon(Icon::Minus)
-                                .into_item(),
-                        )
-                    }
+                    // OpenWarp(Wave 6-7):“Leave shared object” 菜单随 `leave_object` pub fn 退役。
+                    let _ = object;
                 }
             }
         } else {
@@ -4601,14 +4572,7 @@ impl DriveIndex {
                 }
 
                 if FeatureFlag::SharedWithMe.is_enabled() && object.can_leave(app) {
-                    menu_items.push(
-                        MenuItemFields::new(crate::t!("drive-remove"))
-                            .with_on_select_action(DriveIndexAction::LeaveSharedObject {
-                                cloud_object_type_and_id: *cloud_object_type_and_id,
-                            })
-                            .with_icon(Icon::Minus)
-                            .into_item(),
-                    )
+                    // OpenWarp(Wave 6-7):“Leave shared object” 菜单随 `leave_object` pub fn 退役。
                 }
             }
         }
@@ -5234,11 +5198,6 @@ impl TypedActionView for DriveIndex {
                 }
 
                 ctx.notify();
-            }
-            DriveIndexAction::LeaveSharedObject {
-                cloud_object_type_and_id,
-            } => {
-                self.leave_object(cloud_object_type_and_id, ctx);
             }
             DriveIndexAction::CloseCloudObjectNamingDialog => {
                 self.cloud_object_naming_dialog.close(ctx);
