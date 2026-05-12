@@ -2633,10 +2633,8 @@ pub async fn generate_byop_output(
                         // 命中 Message::UpdateTodos 分支 → update_todo_list_from_todo_op
                         // → emit BlocklistAIHistoryEvent::UpdatedTodoList,UI 自动刷新。
                         yield Ok(make_add_messages_event(&current_task_id, todo_msgs));
-                        let result_payload = serde_json::json!({
-                            "status": "ok",
-                            "message": "todo list updated",
-                        });
+                        let result_payload =
+                            tools::todowrite::success_result_to_json("todo list updated");
                         let result_content = serde_json::to_string(&result_payload)
                             .unwrap_or_else(|_| r#"{"status":"ok"}"#.to_owned());
                         final_messages.push(make_tool_call_carrier_message(
@@ -2656,7 +2654,9 @@ pub async fn generate_byop_output(
                     Ok(_) => {
                         // 空 todos 数组:不 emit UpdateTodos,但仍要给模型 result
                         // 否则下一轮 chat 会卡(模型等 tool_call_id 的 result)。
-                        let result_content = r#"{"status":"ok","message":"no todos"}"#.to_owned();
+                        let result_payload = tools::todowrite::success_result_to_json("no todos");
+                        let result_content = serde_json::to_string(&result_payload)
+                            .unwrap_or_else(|_| r#"{"status":"ok","message":"no todos"}"#.to_owned());
                         final_messages.push(make_tool_call_carrier_message(
                             &current_task_id,
                             &request_id,
@@ -2677,13 +2677,10 @@ pub async fn generate_byop_output(
                             "[byop] todowrite args parse failed: call_id={} err={e:#}",
                             call.call_id
                         );
-                        let error_payload = serde_json::json!({
-                            "error": "invalid_arguments",
-                            "detail": e.to_string(),
-                            "tool": call.fn_name,
-                            "received_args": &args_str,
-                            "hint": "Expected { todos: [{ content: string, status: string }] }.",
-                        });
+                        let error_payload = tools::todowrite::invalid_arguments_result_to_json(
+                            e.to_string(),
+                            &args_str,
+                        );
                         let error_content = serde_json::to_string(&error_payload)
                             .unwrap_or_else(|_| r#"{"error":"invalid_arguments"}"#.to_owned());
                         final_messages.push(make_tool_call_carrier_message(
