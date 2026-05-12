@@ -53,9 +53,6 @@ use super::{
     WriterHandles,
 };
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::ambient_agents::scheduled::{
-    CloudScheduledAmbientAgent, CloudScheduledAmbientAgentModel,
-};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::cloud_environments::{
     CloudAmbientAgentEnvironment, CloudAmbientAgentEnvironmentModel,
@@ -3048,21 +3045,6 @@ fn read_sqlite_data(
                                 model.ok().map(|model| {
                                     let boxed: Box<dyn CloudObject> =
                                         Box::new(CloudAmbientAgentEnvironment::new(
-                                            server_id,
-                                            model,
-                                            to_cloud_object_metadata(metadata),
-                                            cloud_object_permissions,
-                                        ));
-                                    boxed
-                                })
-                            }
-                            JsonObjectType::ScheduledAmbientAgent => {
-                                let model = CloudScheduledAmbientAgentModel::deserialize_owned(
-                                    &object.data,
-                                );
-                                model.ok().map(|model| {
-                                    let boxed: Box<dyn CloudObject> =
-                                        Box::new(CloudScheduledAmbientAgent::new(
                                             server_id,
                                             model,
                                             to_cloud_object_metadata(metadata),

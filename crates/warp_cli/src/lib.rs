@@ -28,7 +28,6 @@ pub mod json_filter;
 pub mod mcp;
 pub mod model;
 pub mod provider;
-pub mod schedule;
 pub mod secret;
 pub mod share;
 pub mod task;
@@ -98,7 +97,6 @@ pub struct GlobalOptions {
 The Oz CLI is a tool for running, managing, and orchestrating coding agents at scale.
 Use the CLI to:
 * Launch and inspect cloud agents
-* Schedule cloud agents to run in the future
 * Manage the environments that cloud agents run in
 * Upload secrets to Oz's secure storage"#
 )]
@@ -207,15 +205,6 @@ impl Args {
                     }
                 }
 
-                if !FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-                    let args: Vec<String> = env::args().collect();
-                    if args.len() > 1 && args[1] == "schedule" {
-                        eprintln!("error: unrecognized subcommand 'schedule'\n");
-                        eprintln!("For more information, try '--help'");
-                        std::process::exit(2);
-                    }
-                }
-
                 if !FeatureFlag::WarpManagedSecrets.is_enabled() {
                     let args: Vec<String> = env::args().collect();
                     if args.len() > 1 && args[1] == "secret" {
@@ -304,11 +293,6 @@ impl Args {
         // Hide the integration subcommand from help text
         if !FeatureFlag::IntegrationCommand.is_enabled() {
             command = command.mut_subcommand("integration", |c| c.hide(true));
-        }
-
-        // Hide the schedule subcommand from help text.
-        if !FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-            command = command.mut_subcommand("schedule", |c| c.hide(true));
         }
 
         // Hide the secret subcommand from help text.
@@ -501,11 +485,6 @@ pub enum CliCommand {
     /// Manage integrations.
     #[command(subcommand)]
     Integration(crate::integration::IntegrationCommand),
-
-    /// Create and manage scheduled Oz agents. Scheduled agents run a user-defined task periodically, according to a cron schedule.
-    ///
-    /// As a shorthand, the `schedule` command behaves identically to `schedule create`.
-    Schedule(crate::schedule::ScheduleCommand),
 
     /// Manage secrets.
     #[command(subcommand)]

@@ -30,7 +30,6 @@ use warp_cli::{
     mcp::MCPCommand,
     model::ModelCommand,
     provider::ProviderCommand,
-    schedule::ScheduleSubcommand,
     secret::SecretCommand,
     share::ShareRequest,
     task::{MessageCommand, TaskCommand},
@@ -89,7 +88,6 @@ pub mod output;
 mod profiles;
 mod provider;
 pub(crate) mod retry;
-mod schedule;
 mod secret;
 mod telemetry;
 #[cfg(test)]
@@ -155,12 +153,6 @@ fn dispatch_command(
         #[cfg(target_family = "wasm")]
         CliCommand::Integration(_) => {
             return Err(anyhow::anyhow!("invalid value 'integration'"));
-        }
-        CliCommand::Schedule(schedule_cmd) => {
-            if !FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-                return Err(anyhow::anyhow!("invalid value 'schedule'"));
-            }
-            schedule::run(ctx, global_options, schedule_cmd)
         }
         CliCommand::Secret(secret_cmd) => {
             if !FeatureFlag::WarpManagedSecrets.is_enabled() {
@@ -1195,7 +1187,6 @@ fn command_requires_auth(command: &CliCommand) -> bool {
         CliCommand::Whoami => true,
         CliCommand::Provider(_) => true,
         CliCommand::Integration(_) => true,
-        CliCommand::Schedule(_) => true,
         CliCommand::Secret(_) => true,
         CliCommand::Federate(_) => true,
         CliCommand::HarnessSupport(_) => true,
@@ -1371,15 +1362,6 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
             IntegrationCommand::Create(_) => CliTelemetryEvent::IntegrationCreate,
             IntegrationCommand::Update(_) => CliTelemetryEvent::IntegrationUpdate,
             IntegrationCommand::List => CliTelemetryEvent::IntegrationList,
-        },
-        CliCommand::Schedule(c) => match c.subcommand() {
-            None | Some(ScheduleSubcommand::Create(_)) => CliTelemetryEvent::ScheduleCreate,
-            Some(ScheduleSubcommand::List) => CliTelemetryEvent::ScheduleList,
-            Some(ScheduleSubcommand::Get(_)) => CliTelemetryEvent::ScheduleGet,
-            Some(ScheduleSubcommand::Pause(_)) => CliTelemetryEvent::SchedulePause,
-            Some(ScheduleSubcommand::Unpause(_)) => CliTelemetryEvent::ScheduleUnpause,
-            Some(ScheduleSubcommand::Update(_)) => CliTelemetryEvent::ScheduleUpdate,
-            Some(ScheduleSubcommand::Delete(_)) => CliTelemetryEvent::ScheduleDelete,
         },
         CliCommand::Secret(secret_cmd) => match secret_cmd {
             SecretCommand::Create(_) => CliTelemetryEvent::SecretCreate,

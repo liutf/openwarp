@@ -29,7 +29,6 @@ use crate::{
     },
 };
 use warp_graphql::ai::{AgentTaskState, PlatformErrorCode};
-use warp_graphql::queries::get_scheduled_agent_history::ScheduledAgentHistory;
 
 // Re-export ambient agent types for backwards compatibility
 pub use crate::ai::ambient_agents::{
@@ -651,11 +650,6 @@ pub trait AIClient: 'static + Send + Sync {
         task_id: &AmbientAgentTaskId,
     ) -> anyhow::Result<serde_json::Value, anyhow::Error>;
 
-    async fn get_scheduled_agent_history(
-        &self,
-        schedule_id: &str,
-    ) -> anyhow::Result<ScheduledAgentHistory, anyhow::Error>;
-
     async fn list_agents(
         &self,
         repo: Option<String>,
@@ -825,15 +819,6 @@ impl AIClient for ServerApi {
     ) -> anyhow::Result<serde_json::Value, anyhow::Error> {
         Err(anyhow!(
             "AI client `get_agent_run_raw` is disabled in OpenWarp"
-        ))
-    }
-
-    async fn get_scheduled_agent_history(
-        &self,
-        _schedule_id: &str,
-    ) -> anyhow::Result<ScheduledAgentHistory, anyhow::Error> {
-        Err(anyhow!(
-            "AI client `get_scheduled_agent_history` is disabled in OpenWarp"
         ))
     }
 

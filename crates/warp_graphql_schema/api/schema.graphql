@@ -1460,7 +1460,6 @@ enum GenericStringObjectFormat {
   JsonEnvVarCollection
   JsonMCPServer
   JsonPreference
-  JsonScheduledAmbientAgent
   JsonTemplatableMCPServer
   JsonWorkflowEnum
 }

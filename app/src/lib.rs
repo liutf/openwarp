@@ -1770,9 +1770,6 @@ fn initialize_app(
     ctx.add_singleton_model(EnvVarCollectionManager::new);
     ctx.add_singleton_model(WorkflowManager::new);
 
-    // OpenWarp(本地化,Phase 5):`ScheduledAgentManager` 需要云端 ambient agent 调度,
-    // FeatureFlag::ScheduledAmbientAgents 在 Phase 3b-1 已下柜,singleton 永不注入。
-
     AutoupdateState::register(ctx, server_api.clone());
 
     ctx.add_singleton_model(LocalWorkflows::new);

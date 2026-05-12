@@ -161,7 +161,6 @@ pub enum JsonObjectType {
     AIExecutionProfile,
     TemplatableMCPServer,
     CloudEnvironment,
-    ScheduledAmbientAgent,
 }
 
 impl JsonObjectType {
@@ -175,7 +174,6 @@ impl JsonObjectType {
             JsonObjectType::AIExecutionProfile => "AIEXECUTIONPROFILE",
             JsonObjectType::TemplatableMCPServer => "TEMPLATABLEMCPSERVER",
             JsonObjectType::CloudEnvironment => "CLOUDENVIRONMENT",
-            JsonObjectType::ScheduledAmbientAgent => "SCHEDULEDAMBIENTAGENT",
         }
     }
 }
@@ -193,7 +191,6 @@ impl TryFrom<&str> for JsonObjectType {
             "AIEXECUTIONPROFILE" => Ok(JsonObjectType::AIExecutionProfile),
             "TEMPLATABLEMCPSERVER" => Ok(JsonObjectType::TemplatableMCPServer),
             "CLOUDENVIRONMENT" => Ok(JsonObjectType::CloudEnvironment),
-            "SCHEDULEDAMBIENTAGENT" => Ok(JsonObjectType::ScheduledAmbientAgent),
             _ => Err(anyhow!("could not convert unknown json object type")),
         }
     }
@@ -794,9 +791,6 @@ impl From<GenericStringObjectFormat>
             }
             GenericStringObjectFormat::Json(JsonObjectType::CloudEnvironment) => {
                 GraphQLFormat::JsonCloudEnvironment
-            }
-            GenericStringObjectFormat::Json(JsonObjectType::ScheduledAmbientAgent) => {
-                GraphQLFormat::JsonScheduledAmbientAgent
             }
         }
     }

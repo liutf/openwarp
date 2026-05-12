@@ -2,7 +2,6 @@
 use crate::ai::mcp::templatable::{CloudTemplatableMCPServerModel, TemplatableMCPServer};
 use crate::{
     ai::{
-        ambient_agents::scheduled::{CloudScheduledAmbientAgentModel, ScheduledAmbientAgent},
         cloud_environments::{AmbientAgentEnvironment, CloudAmbientAgentEnvironmentModel},
         execution_profiles::{AIExecutionProfile, CloudAIExecutionProfileModel},
         facts::{AIFact, CloudAIFactModel},
@@ -22,9 +21,8 @@ use crate::{
         GenericServerObject, GenericStringObjectFormat, JsonObjectType, ObjectIdType, ObjectType,
         Owner, Revision, ServerAIExecutionProfile, ServerAIFact, ServerAmbientAgentEnvironment,
         ServerCloudObject, ServerEnvVarCollection, ServerFolder, ServerMCPServer, ServerMetadata,
-        ServerNotebook, ServerObject, ServerPreference, ServerScheduledAmbientAgent,
-        ServerTemplatableMCPServer, ServerWorkflow, ServerWorkflowEnum, Space,
-        UpdateCloudObjectResult,
+        ServerNotebook, ServerObject, ServerPreference, ServerTemplatableMCPServer, ServerWorkflow,
+        ServerWorkflowEnum, Space, UpdateCloudObjectResult,
     },
     drive::{
         folders::{CloudFolderModel, FolderId},
@@ -666,21 +664,6 @@ impl UpdateManager {
                         .iter()
                         .filter_map(|obj| {
                             let server_obj: Option<&ServerAmbientAgentEnvironment> = obj.into();
-                            server_obj.cloned()
-                        })
-                        .collect::<Vec<_>>();
-                    sqlite_events.push(Self::handle_object_updates(
-                        typed_objects,
-                        force_refresh,
-                        !is_first_load,
-                        ctx,
-                    ));
-                }
-                GenericStringObjectFormat::Json(JsonObjectType::ScheduledAmbientAgent) => {
-                    let typed_objects = objects
-                        .iter()
-                        .filter_map(|obj| {
-                            let server_obj: Option<&ServerScheduledAmbientAgent> = obj.into();
                             server_obj.cloned()
                         })
                         .collect::<Vec<_>>();
@@ -1610,41 +1593,6 @@ impl UpdateManager {
             // When adding the initiated_by parameter to this function call, InitiatedBy::User was set as a default value.
             // This can be changed to InitiatedBy::System if this action was automatically kicked off by the system and we do not want a user facing toast.
             InitiatedBy::User,
-            ctx,
-        )
-    }
-
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
-    pub fn create_scheduled_ambient_agent_online(
-        &mut self,
-        scheduled_ambient_agent: ScheduledAmbientAgent,
-        client_id: ClientId,
-        owner: Owner,
-        ctx: &mut ModelContext<Self>,
-    ) -> impl Future<Output = anyhow::Result<ServerId>> {
-        self.create_object_online(
-            CloudScheduledAmbientAgentModel::new(scheduled_ambient_agent),
-            owner,
-            client_id,
-            Default::default(),
-            false,
-            None,
-            ctx,
-        )
-    }
-
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
-    pub fn update_scheduled_ambient_agent_online(
-        &mut self,
-        scheduled_ambient_agent: ScheduledAmbientAgent,
-        scheduled_ambient_agent_id: SyncId,
-        revision_ts: Option<Revision>,
-        ctx: &mut ModelContext<Self>,
-    ) -> impl Future<Output = anyhow::Result<()>> {
-        self.update_object_online(
-            CloudScheduledAmbientAgentModel::new(scheduled_ambient_agent),
-            scheduled_ambient_agent_id,
-            revision_ts,
             ctx,
         )
     }
