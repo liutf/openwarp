@@ -3072,8 +3072,6 @@ fn read_sqlite_data(
                                     boxed
                                 })
                             }
-                            // TODO: Implement CloudAgentConfig model when full sync support is added
-                            JsonObjectType::CloudAgentConfig => None,
                         })
                     })
             })
