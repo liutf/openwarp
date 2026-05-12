@@ -269,17 +269,6 @@ pub struct FileArtifactResponseData {
     pub size_bytes: Option<i64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct AttachmentFileInfo {
-    pub filename: String,
-    pub mime_type: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct PrepareAttachmentUploadsRequest {
-    pub files: Vec<AttachmentFileInfo>,
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct HandoffSnapshotAttachmentInfo {
     pub attachment_id: String,
@@ -291,17 +280,6 @@ pub struct HandoffSnapshotAttachmentInfo {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ListHandoffSnapshotAttachmentsResponse {
     pub attachments: Vec<HandoffSnapshotAttachmentInfo>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct AttachmentUploadInfo {
-    pub attachment_id: String,
-    pub upload_url: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct PrepareAttachmentUploadsResponse {
-    pub attachments: Vec<AttachmentUploadInfo>,
 }
 
 /// Filter parameters for listing ambient agent tasks.
@@ -628,12 +606,6 @@ pub trait AIClient: 'static + Send + Sync {
         artifact_uid: &str,
     ) -> anyhow::Result<ArtifactDownloadResponse, anyhow::Error>;
 
-    async fn prepare_attachments_for_upload(
-        &self,
-        task_id: &AmbientAgentTaskId,
-        files: &[AttachmentFileInfo],
-    ) -> anyhow::Result<PrepareAttachmentUploadsResponse, anyhow::Error>;
-
     async fn get_handoff_snapshot_attachments(
         &self,
         task_id: &AmbientAgentTaskId,
@@ -777,14 +749,6 @@ impl AIClient for LocalAIClient {
         _artifact_uid: &str,
     ) -> anyhow::Result<ArtifactDownloadResponse, anyhow::Error> {
         Err(disabled_ai_client_method("get_artifact_download"))
-    }
-
-    async fn prepare_attachments_for_upload(
-        &self,
-        _task_id: &AmbientAgentTaskId,
-        _files: &[AttachmentFileInfo],
-    ) -> anyhow::Result<PrepareAttachmentUploadsResponse, anyhow::Error> {
-        Err(disabled_ai_client_method("prepare_attachments_for_upload"))
     }
 
     async fn get_handoff_snapshot_attachments(
