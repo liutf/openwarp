@@ -2724,14 +2724,6 @@ type RootQuery {
   """
   syncMerkleTree(input: SyncMerkleTreeInput!, requestContext: RequestContext!): SyncMerkleTreeResult!
 
-  """
-  Fetch attachments for a task.
-  Requires the caller to have ViewAction permission on the task.
-  
-  Note: This query returns a Task object to allow future extension.
-  In the future, this may be merged with taskSecrets into a single task query.
-  """
-  task(input: TaskInput!, requestContext: RequestContext!): TaskResult!
   taskSecrets(input: TaskSecretsInput!, requestContext: RequestContext!): TaskSecretsResult!
   updatedCloudObjects(input: UpdatedCloudObjectsInput!, requestContext: RequestContext!): UpdatedCloudObjectsResult!
   user(requestContext: RequestContext!): UserResult!
@@ -3096,50 +3088,6 @@ Error type for when a user violates terms of service, typically flagged by fraud
 type TOSViolationError implements UserFacingErrorInterface {
   message: String!
 }
-
-"""
-Task object containing attachments.
-In the future, this can be extended with more fields (secrets, etc.) and 
-merged with other task queries into a single unified query.
-"""
-type Task {
-  """List of attachments (images/files) associated with this task."""
-  attachments: [TaskAttachment!]!
-
-  """The ID of the task."""
-  taskId: ID!
-}
-
-"""A task attachment (file or image) with presigned download URL."""
-type TaskAttachment {
-  """Presigned URL for downloading the attachment (valid for 15 minutes)."""
-  downloadUrl: String!
-
-  """
-  Unique identifier for this file (UUID from GCS).
-  Can be used to distinguish files with duplicate names.
-  """
-  fileId: ID!
-
-  """Original filename of the attachment."""
-  filename: String!
-
-  """MIME type of the attachment."""
-  mimeType: String!
-}
-
-"""Input for task-related queries."""
-input TaskInput {
-  """The ID of the task."""
-  taskId: ID!
-}
-
-type TaskOutput implements Response {
-  responseContext: ResponseContext!
-  task: Task!
-}
-
-union TaskResult = TaskOutput | UserFacingError
 
 type TaskSecretEntry {
   name: String!

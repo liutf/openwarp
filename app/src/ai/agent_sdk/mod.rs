@@ -51,7 +51,6 @@ use crate::{
 use driver::AgentDriverError;
 use warp_graphql::object_permissions::OwnerType;
 
-use crate::ai::attachment_utils::attachments_download_dir;
 use crate::ai::skills::{
     clone_repo_for_skill, resolve_skill_spec, ResolveSkillError, ResolvedSkill,
 };
@@ -708,7 +707,7 @@ impl AgentDriverRunner {
 
         // Build the AgentConfigSnapshot, Task, and AgentDriverOptions
         let prompt_clone = prompt.clone();
-        let (merged_config, mut task, mut driver_options) = foreground
+        let (merged_config, task, mut driver_options) = foreground
             .spawn(move |_, ctx| -> anyhow::Result<_> {
                 let (merged_config, task) =
                     build_merged_config_and_task(&args, &resolved_skill, &prompt_clone, ctx)?;
@@ -742,17 +741,12 @@ impl AgentDriverRunner {
             .await?
             .map_err(AgentDriverError::ConfigBuildFailed)?;
 
-        // Handle secrets/attachments fetch (existing task) or task creation (new run).
-        // The existing-task branch also surfaces the task's `conversation_id` (if any) so
-        // the caller can wire up resume without a separate `--conversation` arg.
+        // 既有 task 拉取 secrets / task metadata,新 run 走本地 task 初始化。
+        // 既有 task 分支还会返回 task 的 `conversation_id`,让调用方不需要额外
+        // `--conversation` 参数也能接上恢复逻辑。
         let task_conversation_id = if let Some(task_id_str) = task_id_str {
-            Self::fetch_secrets_and_attachments(
-                foreground,
-                task_id_str,
-                &mut driver_options,
-                &mut task,
-            )
-            .await?
+            Self::fetch_secrets_and_task_metadata(foreground, task_id_str, &mut driver_options)
+                .await?
         } else {
             // Extract the prompt text that we'll pass up to the server when we create the task.
             let prompt_for_task_creation = match &prompt {
@@ -811,19 +805,17 @@ impl AgentDriverRunner {
         Ok(())
     }
 
-    /// When starting an agent run from an existing task_id, fetch secrets, task metadata,
-    /// and task attachments (images and files) from the server and update the driver options.
+    /// 从既有 task_id 启动 agent run 时,拉取 secrets 和 task metadata 并更新
+    /// driver options。
     ///
-    /// Returns the task's `conversation_id` when the server has linked the task to an existing
-    /// AI conversation (e.g. a `run-cloud --conversation` spawn). The caller uses this to drive
-    /// transcript rehydration without a separate `--conversation` CLI arg.
-    async fn fetch_secrets_and_attachments(
+    /// 如果服务端 task 已关联既有 AI conversation,返回它的 `conversation_id`。
+    /// 调用方用它恢复 transcript,无需额外 `--conversation` CLI 参数。
+    async fn fetch_secrets_and_task_metadata(
         foreground: &ModelSpawner<Self>,
         task_id_str: String,
         driver_options: &mut AgentDriverOptions,
-        task: &mut Task,
     ) -> Result<Option<String>, AgentDriverError> {
-        let (task_secrets, ai_client, server_api) = foreground
+        let (task_secrets, ai_client) = foreground
             .spawn({
                 let task_id_str = task_id_str.clone();
                 move |_, ctx| {
@@ -834,10 +826,7 @@ impl AgentDriverRunner {
                         .as_ref(ctx)
                         .get_ai_client()
                         .clone();
-                    let server_api = ServerApiProvider::handle(ctx)
-                        .as_ref(ctx)
-                        .get_local_client();
-                    (task_secrets, ai_client, server_api)
+                    (task_secrets, ai_client)
                 }
             })
             .await?;
@@ -850,10 +839,6 @@ impl AgentDriverRunner {
             }
         };
 
-        // Fetch secrets, task metadata, regular attachments, and handoff snapshot
-        // attachments in parallel. The handoff snapshot fetch is independent of the
-        // other three calls and only shares the download dir (a cloned PathBuf).
-        let attachments_download_dir = attachments_download_dir(&driver_options.working_dir);
         let task_ai_client = ai_client.clone();
         let task_metadata = async {
             match parsed_task_id {
@@ -865,61 +850,8 @@ impl AgentDriverRunner {
             }
         };
 
-        // Handoff snapshot attachments for follow-up executions are written to
-        // {attachments_dir}/handoff/{uuid} so the server-side rehydration prompt
-        // references resolve to real files.
-        let handoff_snapshot_ai_client = ai_client.clone();
-        let handoff_snapshot_server_api = server_api.clone();
-        let handoff_snapshot_download_dir = attachments_download_dir.clone();
-        let handoff_snapshot = async move {
-            if !FeatureFlag::OzHandoff.is_enabled() {
-                return Ok(None);
-            }
-            let Some(task_id_parsed) = parsed_task_id else {
-                return Ok(None);
-            };
-            driver::attachments::fetch_and_download_handoff_snapshot_attachments(
-                handoff_snapshot_ai_client,
-                handoff_snapshot_server_api.http_client(),
-                task_id_parsed,
-                handoff_snapshot_download_dir,
-            )
-            .await
-        };
-        let (secrets_result, attachments_result, task_metadata_result, handoff_snapshot_result) =
-            futures::future::join4(
-                task_secrets,
-                driver::attachments::fetch_and_download_attachments(
-                    ai_client.clone(),
-                    server_api.clone(),
-                    task_id_str.clone(),
-                    attachments_download_dir.clone(),
-                ),
-                task_metadata,
-                handoff_snapshot,
-            )
-            .await;
-
-        // Extract attachments_dir from successful result, log errors
-        let mut attachments_dir = match attachments_result {
-            Ok(dir) => dir,
-            Err(e) => {
-                log::warn!("Failed to fetch and download attachments: {e:#}");
-                None
-            }
-        };
-
-        match handoff_snapshot_result {
-            Ok(Some(dir)) => {
-                // Ensure attachments_dir is set so it's passed to the server even when
-                // there were no regular task attachments.
-                attachments_dir.get_or_insert(dir);
-            }
-            Ok(None) => {}
-            Err(e) => {
-                log::warn!("Failed to fetch handoff snapshot attachments: {e:#}");
-            }
-        }
+        let (secrets_result, task_metadata_result) =
+            futures::future::join(task_secrets, task_metadata).await;
         let secrets = match secrets_result {
             Ok(secrets) => secrets,
             Err(err) => {
@@ -987,15 +919,6 @@ impl AgentDriverRunner {
         driver_options.task_id = parsed_task_id;
         driver_options.parent_run_id = parent_run_id;
         driver_options.secrets = secrets;
-
-        // Update the task prompt to include the downloaded attachments dir
-        if let AgentRunPrompt::ServerSide {
-            attachments_dir: ref mut dir,
-            ..
-        } = task.prompt
-        {
-            *dir = attachments_dir;
-        }
 
         Ok(task_conversation_id)
     }

@@ -31,8 +31,8 @@ use warp_graphql::ai::{AgentTaskState, PlatformErrorCode};
 
 // Re-export ambient agent types for backwards compatibility
 pub use crate::ai::ambient_agents::{
-    task::{AttachmentInput, TaskAttachment},
-    AgentConfigSnapshot, AgentSource, AmbientAgentTask, AmbientAgentTaskState, TaskStatusMessage,
+    task::AttachmentInput, AgentConfigSnapshot, AgentSource, AmbientAgentTask,
+    AmbientAgentTaskState, TaskStatusMessage,
 };
 
 /// A status update for a task, optionally including a platform error code.
@@ -596,20 +596,10 @@ pub trait AIClient: 'static + Send + Sync {
         task_id: &AmbientAgentTaskId,
     ) -> anyhow::Result<(), anyhow::Error>;
 
-    async fn get_task_attachments(
-        &self,
-        task_id: String,
-    ) -> anyhow::Result<Vec<TaskAttachment>, anyhow::Error>;
-
     async fn get_artifact_download(
         &self,
         artifact_uid: &str,
     ) -> anyhow::Result<ArtifactDownloadResponse, anyhow::Error>;
-
-    async fn get_handoff_snapshot_attachments(
-        &self,
-        task_id: &AmbientAgentTaskId,
-    ) -> anyhow::Result<Vec<TaskAttachment>, anyhow::Error>;
 
     // --- Orchestrations V2 messaging ---
 
@@ -737,27 +727,11 @@ impl AIClient for LocalAIClient {
         Err(disabled_ai_client_method("cancel_ambient_agent_task"))
     }
 
-    async fn get_task_attachments(
-        &self,
-        _task_id: String,
-    ) -> anyhow::Result<Vec<TaskAttachment>, anyhow::Error> {
-        Err(disabled_ai_client_method("get_task_attachments"))
-    }
-
     async fn get_artifact_download(
         &self,
         _artifact_uid: &str,
     ) -> anyhow::Result<ArtifactDownloadResponse, anyhow::Error> {
         Err(disabled_ai_client_method("get_artifact_download"))
-    }
-
-    async fn get_handoff_snapshot_attachments(
-        &self,
-        _task_id: &AmbientAgentTaskId,
-    ) -> anyhow::Result<Vec<TaskAttachment>, anyhow::Error> {
-        Err(disabled_ai_client_method(
-            "get_handoff_snapshot_attachments",
-        ))
     }
 
     async fn send_agent_message(
